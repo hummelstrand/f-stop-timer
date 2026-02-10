@@ -10,6 +10,7 @@ void setNormalState();
 */
 
 #include <TM1638plus.h>
+#include <string.h>
 
 // GPIO I/O pins on the Arduino
 #if defined(__AVR__)
@@ -28,6 +29,17 @@ void setNormalState();
 
 #define RELAY_PIN 5 // Relay control pin
 #define BUZZER_PIN 16 // Buzzer control pin
+
+// App version
+const char APP_VERSION[] = "VERS 0.1.0";
+const unsigned long VERSION_DISPLAY_MS = 1000;
+const unsigned long STARTUP_ALL_ON_MS = 500;
+
+// Buzzer configuration
+const unsigned int BUZZER_SHORT_FREQUENCY = 2400; // Hz
+const unsigned int BUZZER_LONG_FREQUENCY = 440; // Hz
+const unsigned int BUZZER_SHORT_BEEP_MS = 40; // FocusLight short beep duration
+const unsigned int BUZZER_LONG_BEEP_MS = 160; // FocusLight/Exposure long beep duration
 
 // Button definitions (bit patterns from TM1638)
 #define btn1 1
@@ -59,7 +71,9 @@ uint8_t lastButton = 0;
 const unsigned long CONTINUOUS_PRESS_THRESHOLD = 300; // milliseconds
 const unsigned long AUTO_REPEAT_INTERVAL = 200; // milliseconds between auto-repeats (initial)
 const unsigned long AUTO_REPEAT_INTERVAL_FAST = 50; // milliseconds between auto-repeats (after prolonged press)
-const unsigned long AUTO_REPEAT_FAST_THRESHOLD = 2000; // milliseconds before switching to fast repeat
+const unsigned long AUTO_REPEAT_INTERVAL_ULTRA = 2; // milliseconds between auto-repeats (ultra fast)
+const unsigned long AUTO_REPEAT_FAST_THRESHOLD = 1500; // milliseconds before switching to fast repeat
+const unsigned long AUTO_REPEAT_ULTRA_THRESHOLD = 3000; // milliseconds before switching to ultra fast repeat
 unsigned long buttonPressStartTime = 0; // When the button was first pressed
 bool continuousPressDetected = false; // Whether continuous press has been identified
 unsigned long lastAutoRepeatTime = 0; // Last time auto-repeat triggered
@@ -86,6 +100,12 @@ bool btn6PressHandled = false; // For single press on btn6 (decrease)
 bool btn7PressHandled = false; // For single press on btn7 (increase)
 bool btn8PressHandled = false; // For single press on btn8 (start/pause/resume)
 
+// Buzzer timing state
+unsigned long focusLastShortBeepSecond = 0;
+unsigned long focusLastLongBeepSecond = 0;
+unsigned long exposureLastLongBeepSecond = 0;
+unsigned long exposureBeepAccumulatedMs = 0;
+
 // ============================================================================
 // HARDWARE INTERFACE SECTION - Display, LEDs, Relay, and Button Control
 // ============================================================================
@@ -95,6 +115,42 @@ bool btn8PressHandled = false; // For single press on btn8 (start/pause/resume)
 */
 void hwSetDisplay(const char* text) {
   tm.displayText(text);
+}
+
+/*
+  Round a value to one decimal place for display
+*/
+float roundToTenth(float value) {
+  if (value < 0.0f) return 0.0f;
+  return ((int)(value * 10.0f + 0.5f)) / 10.0f;
+}
+
+/*
+  Format a right-aligned decimal value for TM1638 displayText.
+  Ensures 8 visible positions after dot-removal handling.
+*/
+void formatRightAlignedDecimal(char* out, size_t size, float value) {
+  char numBuf[8];
+  snprintf(numBuf, sizeof(numBuf), "%4.1f", value);
+
+  size_t len = strlen(numBuf);
+  size_t dotCount = 0;
+  for (size_t i = 0; i < len; i++) {
+    if (numBuf[i] == '.') dotCount++;
+  }
+
+  int effectiveLen = (int)len - (int)dotCount;
+  int padLeft = 8 - effectiveLen;
+  if (padLeft < 0) padLeft = 0;
+
+  size_t idx = 0;
+  while (idx < (size_t)padLeft && idx < size - 1) {
+    out[idx++] = ' ';
+  }
+  for (size_t i = 0; i < len && idx < size - 1; i++) {
+    out[idx++] = numBuf[i];
+  }
+  out[idx] = '\0';
 }
 
 /*
@@ -120,6 +176,18 @@ void hwSetLEDs(uint8_t ledPattern) {
 */
 void hwSetRelay(bool state) {
   digitalWrite(RELAY_PIN, state ? HIGH : LOW);
+}
+
+/*
+  Play a buzzer tone
+  durationMs: duration in milliseconds
+*/
+void hwBeepShort(void) {
+  tone(BUZZER_PIN, BUZZER_SHORT_FREQUENCY, BUZZER_SHORT_BEEP_MS);
+}
+
+void hwBeepLong(void) {
+  tone(BUZZER_PIN, BUZZER_LONG_FREQUENCY, BUZZER_LONG_BEEP_MS);
 }
 
 /*
@@ -167,6 +235,8 @@ bool hwCheckContinuousPress(uint8_t buttonValue, unsigned long duration) {
 void focusTimerStart(void) {
   focusTimerRunning = true;
   focusTimerStartTime = millis();
+  focusLastShortBeepSecond = 0;
+  focusLastLongBeepSecond = 0;
   hwSetRelay(true);
   Serial.println("FocusLight Timer started");
 }
@@ -177,6 +247,8 @@ void focusTimerStart(void) {
 void focusTimerStop(void) {
   focusTimerRunning = false;
   hwSetRelay(false);
+  focusLastShortBeepSecond = 0;
+  focusLastLongBeepSecond = 0;
   Serial.println("FocusLight Timer stopped");
 }
 
@@ -187,6 +259,8 @@ void focusTimerClear(void) {
   focusTimerRunning = false;
   focusTimerElapsed = 0;
   hwSetRelay(false);
+  focusLastShortBeepSecond = 0;
+  focusLastLongBeepSecond = 0;
   setNormalState();
   Serial.println("FocusLight Timer cleared");
 }
@@ -212,7 +286,8 @@ float focusTimerUpdate(void) {
   // Format display: "FOC   12.6" (FOC left, timer right, moved two steps right)
   char displayBuffer[9];
   // Two spaces after 'FOC ', then timer right-justified in 4.1f format
-  sprintf(displayBuffer, "FOC  %4.1f", secs);
+  float displaySecs = roundToTenth(secs);
+  sprintf(displayBuffer, "FOC  %4.1f", displaySecs);
   hwSetDisplay(displayBuffer);
 
   // If timer is not running, turn off LED2 and restore default display
@@ -224,12 +299,51 @@ float focusTimerUpdate(void) {
   return secs;
 }
 
+/*
+  Buzzer updates for FocusLight Timer
+  - Short beep every second
+  - Long beep every 10 seconds
+*/
+void focusTimerBuzzerUpdate(void) {
+  if (!focusTimerRunning) return;
+
+  unsigned long elapsedSeconds = focusTimerElapsed / 1000;
+  if (elapsedSeconds == 0) return;
+
+  if (elapsedSeconds % 10 == 0 && elapsedSeconds != focusLastLongBeepSecond) {
+    hwBeepLong();
+    focusLastLongBeepSecond = elapsedSeconds;
+    focusLastShortBeepSecond = elapsedSeconds; // Avoid double beep on 10s
+  } else if (elapsedSeconds != focusLastShortBeepSecond) {
+    hwBeepShort();
+    focusLastShortBeepSecond = elapsedSeconds;
+  }
+}
+
+/*
+  Buzzer updates for Exposure Timer
+  - Long beep every 10 seconds
+*/
+void exposureTimerBuzzerUpdate(void) {
+  if (!exposureTimerRunning) return;
+
+  unsigned long totalElapsedMs = exposureBeepAccumulatedMs + (millis() - exposureTimerStartTime);
+  unsigned long elapsedSeconds = totalElapsedMs / 1000;
+  if (elapsedSeconds == 0) return;
+
+  if (elapsedSeconds % 10 == 0 && elapsedSeconds != exposureLastLongBeepSecond) {
+    hwBeepLong();
+    exposureLastLongBeepSecond = elapsedSeconds;
+  }
+}
+
 // Set the normal state: display exposureTimer value, relay off, all LEDs off
 void setNormalState() {
   hwSetRelay(false);
   hwSetLEDs(0x00);
-  char expDisp[9];
-  sprintf(expDisp, "    %4.1f", exposureTimerValue);
+  char expDisp[10];
+  float displayExposure = roundToTenth(exposureTimerValue);
+  formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayExposure);
   hwSetDisplay(expDisp);
 }
 
@@ -249,8 +363,21 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   hwSetRelay(false);
+
+  // Startup: all segments and LEDs on briefly
+  hwSetDisplay("8.8.8.8.8.8.8.8.");
+  hwSetLEDs(0xFF);
+  delay(STARTUP_ALL_ON_MS);
+  hwSetDisplay("        ");
+  hwSetLEDs(0x00);
+
+  // Show app version on startup (padded to clear display)
+  char versionBuffer[9];
+  snprintf(versionBuffer, sizeof(versionBuffer), "%-8s", APP_VERSION);
+  hwSetDisplay(versionBuffer);
+  delay(VERSION_DISPLAY_MS);
   
-  // Initialize display with "start" text
+  // Initialize display
   setNormalState();
   
   // Turn off all LEDs
@@ -342,7 +469,11 @@ void loop() {
         // Auto-repeat after threshold (use fast interval after prolonged press)
         else if (isContinuousPress) {
           unsigned long holdDuration = millis() - buttonPressStartTime;
-          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD) ? AUTO_REPEAT_INTERVAL_FAST : AUTO_REPEAT_INTERVAL;
+          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_ULTRA_THRESHOLD)
+            ? AUTO_REPEAT_INTERVAL_ULTRA
+            : (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD)
+              ? AUTO_REPEAT_INTERVAL_FAST
+              : AUTO_REPEAT_INTERVAL;
           if (millis() - lastAutoRepeatTime >= repeatInterval) {
             shouldDecrement = true;
             lastAutoRepeatTime = millis();
@@ -354,8 +485,9 @@ void loop() {
           if (exposureTimerValue < MIN_EXPOSURE_TIMER_SECONDS) {
             exposureTimerValue = MIN_EXPOSURE_TIMER_SECONDS;
           }
-          char expDisp6[9];
-          sprintf(expDisp6, "    %4.1f", exposureTimerValue);
+          char expDisp6[10];
+          float displayExposure6 = roundToTenth(exposureTimerValue);
+          formatRightAlignedDecimal(expDisp6, sizeof(expDisp6), displayExposure6);
           hwSetDisplay(expDisp6);
         }
       }
@@ -375,7 +507,11 @@ void loop() {
         // Auto-repeat after threshold (use fast interval after prolonged press)
         else if (isContinuousPress) {
           unsigned long holdDuration = millis() - buttonPressStartTime;
-          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD) ? AUTO_REPEAT_INTERVAL_FAST : AUTO_REPEAT_INTERVAL;
+          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_ULTRA_THRESHOLD)
+            ? AUTO_REPEAT_INTERVAL_ULTRA
+            : (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD)
+              ? AUTO_REPEAT_INTERVAL_FAST
+              : AUTO_REPEAT_INTERVAL;
           if (millis() - lastAutoRepeatTime >= repeatInterval) {
             shouldIncrement = true;
             lastAutoRepeatTime = millis();
@@ -387,8 +523,9 @@ void loop() {
           if (exposureTimerValue > MAX_EXPOSURE_TIMER_SECONDS) {
             exposureTimerValue = MAX_EXPOSURE_TIMER_SECONDS;
           }
-          char expDisp7[9];
-          sprintf(expDisp7, "    %4.1f", exposureTimerValue);
+          char expDisp7[10];
+          float displayExposure7 = roundToTenth(exposureTimerValue);
+          formatRightAlignedDecimal(expDisp7, sizeof(expDisp7), displayExposure7);
           hwSetDisplay(expDisp7);
         }
       }
@@ -406,8 +543,9 @@ void loop() {
           exposureTimerStartTime = millis();
           hwSetRelay(true);
           hwSetLED(7, 1);  // LED8 ON (position 7)
-          char expDisp8[9];
-          sprintf(expDisp8, "    %4.1f", exposureTimerCountdown);
+          char expDisp8[10];
+          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
+          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
           hwSetDisplay(expDisp8);
         } else if (exposureTimerRunning) {
           // Pause exposure timer
@@ -418,8 +556,9 @@ void loop() {
           if (exposureTimerCountdown < 0.0f) exposureTimerCountdown = 0.0f;
           hwSetRelay(false);
           hwSetLED(7, 0);  // LED8 OFF (position 7)
-          char expDisp8[9];
-          sprintf(expDisp8, "    %4.1f", exposureTimerCountdown);
+          char expDisp8[10];
+          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
+          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
           hwSetDisplay(expDisp8);
         } else if (exposureTimerPaused) {
           // Resume exposure timer
@@ -428,8 +567,9 @@ void loop() {
           exposureTimerStartTime = millis();
           hwSetRelay(true);
           hwSetLED(7, 1);  // LED8 ON (position 7)
-          char expDisp8[9];
-          sprintf(expDisp8, "    %4.1f", exposureTimerCountdown);
+          char expDisp8[10];
+          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
+          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
           hwSetDisplay(expDisp8);
         }
       }
@@ -481,8 +621,9 @@ void loop() {
       setNormalState();
     } else {
       // Update display with remaining time
-      char expDisp[9];
-      sprintf(expDisp, "    %4.1f", remaining);
+      char expDisp[10];
+      float displayRemaining = roundToTenth(remaining);
+      formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayRemaining);
       hwSetDisplay(expDisp);
     }
   }

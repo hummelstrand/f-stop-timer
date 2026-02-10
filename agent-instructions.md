@@ -18,6 +18,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Display format: "FOC  " + time (e.g., "FOC  12.6")
 - Continuous press: timer runs and stops on button release
 - Short press: toggles between running and cleared states
+- Buzzer: short beep every second and long beep every 10 seconds (long overrides short on 10s)
 
 ### Exposure Timer (btn6/btn7/btn8)
 - Count-down timer; adjustable via btn6 (decrease) and btn7 (increase) in 0.1s steps
@@ -28,6 +29,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
   - Pause: halts countdown, relay OFF, LED8 OFF, saves remaining time
   - Resume: resumes from paused time, relay ON, LED8 ON
 - When countdown reaches 0, relay turns OFF, LED8 OFF, display shows normal state
+- Buzzer: long beep every 10 seconds
 
 ### Normal State
 - Displays current `exposureTimerValue` (e.g., "    8.0")
@@ -40,10 +42,14 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Preserves `exposureTimerValue` for next timer session
 
 ## Timing constants (all in milliseconds)
-- `CONTINUOUS_PRESS_THRESHOLD`: 300 ms (when button becomes "continuous press")
-- `AUTO_REPEAT_INTERVAL`: 200 ms (repeat rate for btn6/btn7 initial hold)
-- `AUTO_REPEAT_INTERVAL_FAST`: 50 ms (fast repeat rate after prolonged hold)
+- `AUTO_REPEAT_INTERVAL_ULTRA`: 5 ms (ultra fast repeat rate after extended hold)
 - `AUTO_REPEAT_FAST_THRESHOLD`: 2000 ms (when to switch to fast repeat)
+- `AUTO_REPEAT_ULTRA_THRESHOLD`: 3000 ms (when to switch to ultra fast repeat)
+- `STARTUP_ALL_ON_MS`: duration to show all segments/LEDs on startup
+
+## App version
+- `BUZZER_SHORT_FREQUENCY`: short beep frequency (Hz)
+- `BUZZER_LONG_FREQUENCY`: long beep frequency (Hz)
 
 ## Button mappings
 - btn1 (bit 1): Cancel all timers
