@@ -8,6 +8,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - The code is organized into sections: Hardware Interface (display, LEDs, relay, button reading), Button Handling (switch statement for each button), and Timer Updates (per-loop execution)
 - Platform support: Conditional compilation handles Arduino (`__AVR__`) and ESP8266 (`ESP8266`) targets; `HIGH_FREQ` flag optimizes TM1638 timing for high-clock MCUs
 - Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16)
+- Display/LED brightness is configurable via `DISPLAY_LED_BRIGHTNESS` and applied by `hwApplyBrightness()` (range 0–7)
 
 ## Timer functionality
 
@@ -19,20 +20,22 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Continuous press: timer runs and stops on button release
 - Short press: toggles between running and cleared states
 - Buzzer: short beep every second and long beep every 10 seconds (long overrides short on 10s)
+  - Note: `focusTimerBuzzerUpdate()` exists but is **not called** in `loop()` yet.
 
 ### Exposure Timer (btn6/btn7/btn8)
 - Count-down timer; adjustable via btn6 (decrease) and btn7 (increase) in 0.1s steps
 - Range: 0.1s to 999.9s; default: 8.0s
-- Auto-repeat on btn6/btn7: initial repeat every 200ms, speeds up to 50ms after 2s continuous hold
+- Auto-repeat on btn6/btn7: initial repeat every 200ms, speeds up to 50ms after 1500ms continuous hold, then 2ms after 3000ms
 - btn8: Start → Pause → Resume cycle
   - Start: begins countdown, relay ON, LED8 (position 7) ON
   - Pause: halts countdown, relay OFF, LED8 OFF, saves remaining time
   - Resume: resumes from paused time, relay ON, LED8 ON
 - When countdown reaches 0, relay turns OFF, LED8 OFF, display shows normal state
 - Buzzer: long beep every 10 seconds
+  - Note: `exposureTimerBuzzerUpdate()` exists but is **not called** in `loop()` yet.
 
 ### Normal State
-- Displays current `exposureTimerValue` (e.g., "    8.0")
+- Displays current `exposureTimerValue` (right-aligned to 8 chars)
 - All LEDs off, relay OFF
 - Shown when no timers are running
 
@@ -42,14 +45,21 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Preserves `exposureTimerValue` for next timer session
 
 ## Timing constants (all in milliseconds)
-- `AUTO_REPEAT_INTERVAL_ULTRA`: 5 ms (ultra fast repeat rate after extended hold)
-- `AUTO_REPEAT_FAST_THRESHOLD`: 2000 ms (when to switch to fast repeat)
-- `AUTO_REPEAT_ULTRA_THRESHOLD`: 3000 ms (when to switch to ultra fast repeat)
-- `STARTUP_ALL_ON_MS`: duration to show all segments/LEDs on startup
+- `CONTINUOUS_PRESS_THRESHOLD`: 300
+- `AUTO_REPEAT_INTERVAL`: 200
+- `AUTO_REPEAT_INTERVAL_FAST`: 50
+- `AUTO_REPEAT_INTERVAL_ULTRA`: 2
+- `AUTO_REPEAT_FAST_THRESHOLD`: 1500
+- `AUTO_REPEAT_ULTRA_THRESHOLD`: 3000
+- `STARTUP_ALL_ON_MS`: 500
+- `VERSION_DISPLAY_MS`: 1000
 
 ## App version
-- `BUZZER_SHORT_FREQUENCY`: short beep frequency (Hz)
-- `BUZZER_LONG_FREQUENCY`: long beep frequency (Hz)
+- `APP_VERSION`: "VERS 0.1.0"
+- `BUZZER_SHORT_FREQUENCY`: 2400 Hz
+- `BUZZER_LONG_FREQUENCY`: 440 Hz
+- `BUZZER_SHORT_BEEP_MS`: 40
+- `BUZZER_LONG_BEEP_MS`: 160
 
 ## Button mappings
 - btn1 (bit 1): Cancel all timers
@@ -76,7 +86,8 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Pin mappings: defined at top of file, conditional on platform (`__AVR__` vs `ESP8266`)
 - Timing constants: all in one place at the top; adjust `CONTINUOUS_PRESS_THRESHOLD`, `AUTO_REPEAT_INTERVAL`, etc. here
 - Relay/LED control: through hardware interface functions to avoid coupling
-- Display format: strings use `sprintf()` with "FOC  %4.1f" for FocusLight and "    %4.1f" for Exposure
+- Brightness: use `DISPLAY_LED_BRIGHTNESS` (0 = dimmest, 7 = brightest) and call `hwApplyBrightness()` after `tm.displayBegin()`
+- Display format: strings use `sprintf()` with "FOC  %4.1f" for FocusLight and right-aligned decimal formatting for Exposure
 - Boolean state tracking: careful attention to `focusTimerRunning`, `exposureTimerRunning`, `exposureTimerPaused` to avoid race conditions in loop
 
 ## Files to know

@@ -10,6 +10,7 @@ This project is heavily indebted to https://github.com/glyons/Darkroom-Timer for
 - Short beep every second for the FocusLight timer, and longer beep every ten seconds for both the FocusLight and the Exposure timer. (The beeper can only be turned off via a physical switch.)
 - Configurable short/long beep durations and separate frequencies for the two beep types.
 - Version display on startup, preceded by an all-segments/all-LEDs test.
+- Brightness of display and LEDs set as variable in code.
 
 ## Yet to be implemented:
 - Adjusting f-stop steps, and displaying currently selected step in display and LED.
@@ -18,7 +19,7 @@ This project is heavily indebted to https://github.com/glyons/Darkroom-Timer for
 - Setting/unsetting "base exposure" with button, and displaying it on the left display.
 - Strip-test mode based on "base exposure".
 - If no "base exposure" has been set, clicking the "Strip Test" button should set the current
-- Brightness of display and LEDs (set as variable in code).
+
 
 ## Possible features:
 - Adding a rotary encoder would be a great feature.

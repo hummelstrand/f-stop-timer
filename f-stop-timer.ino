@@ -32,8 +32,11 @@ void setNormalState();
 
 // App version
 const char APP_VERSION[] = "VERS 0.1.0";
-const unsigned long VERSION_DISPLAY_MS = 1000;
-const unsigned long STARTUP_ALL_ON_MS = 500;
+const unsigned long VERSION_DISPLAY_MS = 1100;
+const unsigned long STARTUP_ALL_ON_MS = 400;
+
+// Display/LED brightness (0 = dimmest, 7 = brightest)
+const uint8_t DISPLAY_LED_BRIGHTNESS = 0;
 
 // Buzzer configuration
 const unsigned int BUZZER_SHORT_FREQUENCY = 2400; // Hz
@@ -106,6 +109,14 @@ unsigned long focusLastLongBeepSecond = 0;
 unsigned long exposureLastLongBeepSecond = 0;
 unsigned long exposureBeepAccumulatedMs = 0;
 
+/*
+  Apply brightness settings for display and LEDs.
+  Range: 0 (dimmest) to 7 (brightest).
+*/
+void hwApplyBrightness(void) {
+  tm.brightness(DISPLAY_LED_BRIGHTNESS);
+}
+
 // ============================================================================
 // HARDWARE INTERFACE SECTION - Display, LEDs, Relay, and Button Control
 // ============================================================================
@@ -151,6 +162,45 @@ void formatRightAlignedDecimal(char* out, size_t size, float value) {
     out[idx++] = numBuf[i];
   }
   out[idx] = '\0';
+}
+
+/*
+  Format text for TM1638 displayText where '.' does not take a character slot.
+  Ensures exactly 8 visible characters (dots excluded) and preserves dots.
+*/
+void formatTextWithDots(char* out, size_t size, const char* text) {
+  size_t idx = 0;
+  size_t effectiveLen = 0;
+
+  for (size_t i = 0; text[i] != '\0' && idx < size - 1; i++) {
+    char c = text[i];
+    if (c == '.') {
+      if (idx > 0 && effectiveLen > 0 && effectiveLen <= 8 && idx < size - 1) {
+        out[idx++] = c;
+      }
+      continue;
+    }
+
+    if (effectiveLen >= 8) break;
+    out[idx++] = c;
+    effectiveLen++;
+  }
+
+  while (effectiveLen < 8 && idx < size - 1) {
+    out[idx++] = ' ';
+    effectiveLen++;
+  }
+
+  out[idx] = '\0';
+}
+
+/*
+  General display helper that handles dot-aware formatting and padding
+*/
+void hwDisplayText(const char* text) {
+  char displayBuffer[16];
+  formatTextWithDots(displayBuffer, sizeof(displayBuffer), text);
+  hwSetDisplay(displayBuffer);
 }
 
 /*
@@ -288,7 +338,7 @@ float focusTimerUpdate(void) {
   // Two spaces after 'FOC ', then timer right-justified in 4.1f format
   float displaySecs = roundToTenth(secs);
   sprintf(displayBuffer, "FOC  %4.1f", displaySecs);
-  hwSetDisplay(displayBuffer);
+  hwDisplayText(displayBuffer);
 
   // If timer is not running, turn off LED2 and restore default display
   if (!focusTimerRunning) {
@@ -344,7 +394,7 @@ void setNormalState() {
   char expDisp[10];
   float displayExposure = roundToTenth(exposureTimerValue);
   formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayExposure);
-  hwSetDisplay(expDisp);
+  hwDisplayText(expDisp);
 }
 
 // ============================================================================
@@ -358,6 +408,7 @@ void setup() {
   
   // Initialize the TM1638plus display
   tm.displayBegin();
+  hwApplyBrightness();
   
   // Initialize relay pin as output and turn it off
   pinMode(RELAY_PIN, OUTPUT);
@@ -365,16 +416,14 @@ void setup() {
   hwSetRelay(false);
 
   // Startup: all segments and LEDs on briefly
-  hwSetDisplay("8.8.8.8.8.8.8.8.");
+  hwDisplayText("8.8.8.8.8.8.8.8.");
   hwSetLEDs(0xFF);
   delay(STARTUP_ALL_ON_MS);
-  hwSetDisplay("        ");
+  hwDisplayText("        ");
   hwSetLEDs(0x00);
 
   // Show app version on startup (padded to clear display)
-  char versionBuffer[9];
-  snprintf(versionBuffer, sizeof(versionBuffer), "%-8s", APP_VERSION);
-  hwSetDisplay(versionBuffer);
+  hwDisplayText(APP_VERSION);
   delay(VERSION_DISPLAY_MS);
   
   // Initialize display
@@ -420,6 +469,8 @@ void loop() {
           exposureTimerRunning = false;
           exposureTimerPaused = false;
           exposureTimerCountdown = 0.0f;
+          exposureBeepAccumulatedMs = 0;
+          exposureLastLongBeepSecond = 0;
           hwSetRelay(false);
           anyCancelled = true;
           Serial.println("Exposure Timer cancelled");
@@ -428,7 +479,7 @@ void loop() {
         // If anything was cancelled, turn off LEDs immediately, show Cancel, then normal state
         if (anyCancelled) {
           hwSetLEDs(0x00);  // Turn off all LEDs immediately
-          hwSetDisplay(" CANCEL ");
+          hwDisplayText(" CANCEL ");
           delay(500);
           setNormalState();
         }
@@ -437,9 +488,20 @@ void loop() {
     
     // ===== BTN2: FocusLight Timer (continuous press to run, short press to toggle) =====
     case btn2:
+      if (exposureTimerRunning) {
+        break; // Exposure timer running: ignore btn2
+      }
       if (isContinuousPress) {
         // Continuous press: Start timer and keep it running while pressed
         if (!focusTimerRunning) {
+          if (exposureTimerPaused) {
+            exposureTimerPaused = false;
+            exposureTimerCountdown = 0.0f;
+            exposureBeepAccumulatedMs = 0;
+            exposureLastLongBeepSecond = 0;
+            hwSetRelay(false);
+            hwSetLED(7, 0);  // LED8 OFF
+          }
           focusTimerStart();
         }
         focusTimerUpdate();
@@ -449,6 +511,14 @@ void loop() {
         if (focusTimerRunning || focusTimerElapsed > 0) {
           focusTimerClear();
         } else {
+          if (exposureTimerRunning || exposureTimerPaused) {
+            exposureTimerRunning = false;
+            exposureTimerPaused = false;
+            exposureTimerCountdown = 0.0f;
+            exposureBeepAccumulatedMs = 0;
+            exposureLastLongBeepSecond = 0;
+            hwSetRelay(false);
+          }
           focusTimerStart();
           focusTimerUpdate();
         }
@@ -457,6 +527,9 @@ void loop() {
     
     // ===== BTN6: Decrease exposureTimer value (with auto-repeat) =====
     case btn6:
+      if (focusTimerRunning || exposureTimerRunning) {
+        break; // Ignore when any timer is running
+      }
       if (!exposureTimerRunning && !exposureTimerPaused) {
         bool shouldDecrement = false;
         
@@ -488,13 +561,16 @@ void loop() {
           char expDisp6[10];
           float displayExposure6 = roundToTenth(exposureTimerValue);
           formatRightAlignedDecimal(expDisp6, sizeof(expDisp6), displayExposure6);
-          hwSetDisplay(expDisp6);
+          hwDisplayText(expDisp6);
         }
       }
       break;
     
     // ===== BTN7: Increase exposureTimer value (with auto-repeat) =====
     case btn7:
+      if (focusTimerRunning || exposureTimerRunning) {
+        break; // Ignore when any timer is running
+      }
       if (!exposureTimerRunning && !exposureTimerPaused) {
         bool shouldIncrement = false;
         
@@ -526,32 +602,41 @@ void loop() {
           char expDisp7[10];
           float displayExposure7 = roundToTenth(exposureTimerValue);
           formatRightAlignedDecimal(expDisp7, sizeof(expDisp7), displayExposure7);
-          hwSetDisplay(expDisp7);
+          hwDisplayText(expDisp7);
         }
       }
       break;
     
     // ===== BTN8: Start/Pause/Resume exposureTimer countdown =====
     case btn8:
+      if (focusTimerRunning) {
+        break; // FocusLight timer running: ignore btn8
+      }
       if (!btn8PressHandled) {
         btn8PressHandled = true;
         if (!exposureTimerRunning && !exposureTimerPaused) {
           // Start exposure timer countdown
+          if (focusTimerRunning || focusTimerElapsed > 0) {
+            focusTimerClear();
+          }
           exposureTimerRunning = true;
           exposureTimerPaused = false;
           exposureTimerCountdown = exposureTimerValue;
+          exposureBeepAccumulatedMs = 0;
+          exposureLastLongBeepSecond = 0;
           exposureTimerStartTime = millis();
           hwSetRelay(true);
           hwSetLED(7, 1);  // LED8 ON (position 7)
           char expDisp8[10];
           float displayCountdown8 = roundToTenth(exposureTimerCountdown);
           formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwSetDisplay(expDisp8);
+          hwDisplayText(expDisp8);
         } else if (exposureTimerRunning) {
           // Pause exposure timer
           exposureTimerRunning = false;
           exposureTimerPaused = true;
           unsigned long elapsed = millis() - exposureTimerStartTime;
+          exposureBeepAccumulatedMs += elapsed;
           exposureTimerCountdown -= (float)elapsed / 1000.0f;
           if (exposureTimerCountdown < 0.0f) exposureTimerCountdown = 0.0f;
           hwSetRelay(false);
@@ -559,7 +644,7 @@ void loop() {
           char expDisp8[10];
           float displayCountdown8 = roundToTenth(exposureTimerCountdown);
           formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwSetDisplay(expDisp8);
+          hwDisplayText(expDisp8);
         } else if (exposureTimerPaused) {
           // Resume exposure timer
           exposureTimerRunning = true;
@@ -570,7 +655,7 @@ void loop() {
           char expDisp8[10];
           float displayCountdown8 = roundToTenth(exposureTimerCountdown);
           formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwSetDisplay(expDisp8);
+          hwDisplayText(expDisp8);
         }
       }
       break;
@@ -616,6 +701,8 @@ void loop() {
       exposureTimerRunning = false;
       exposureTimerPaused = false;
       exposureTimerCountdown = 0.0f;
+      exposureBeepAccumulatedMs = 0;
+      exposureLastLongBeepSecond = 0;
       hwSetRelay(false);
       hwSetLED(7, 0);  // LED8 OFF (position 7)
       setNormalState();
@@ -624,9 +711,13 @@ void loop() {
       char expDisp[10];
       float displayRemaining = roundToTenth(remaining);
       formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayRemaining);
-      hwSetDisplay(expDisp);
+      hwDisplayText(expDisp);
     }
   }
+
+  // Update buzzer patterns
+  focusTimerBuzzerUpdate();
+  exposureTimerBuzzerUpdate();
   
   // ============================================================================
   // STATE TRACKING
