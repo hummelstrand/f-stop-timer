@@ -19,6 +19,9 @@ This project is heavily indebted to https://github.com/glyons/Darkroom-Timer for
 - Brightness of display and LEDs (set as variable in code).
 - Display version number at power on.
 
-## Not planned features:
+## Possible features:
+- Adding a rotary encoder would be a great feature.
+
+## Features that won't be implemented:
 - Brightness control via buttons.
 - Storing any values or settings to EEPROM (to ensure longevity of the hardware).
