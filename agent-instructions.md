@@ -23,26 +23,37 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
   - Note: `focusTimerBuzzerUpdate()` exists but is **not called** in `loop()` yet.
 
 ### Exposure Timer (btn6/btn7/btn8)
-- Count-down timer; adjustable via btn6 (decrease) and btn7 (increase) in 0.1s steps
+- Count-down timer; adjustable via btn6 (decrease) and btn7 (increase)
+- **Seconds Mode**: default behavior; decreases/increases in 0.1s steps
+- **F-Stop Mode**: active when Base Exposure is set (via btn3); decreases/increases by selected f-stop steps (via btn4)
 - Range: 0.1s to 999.9s; default: 8.0s
-- Auto-repeat on btn6/btn7: initial repeat every 200ms, speeds up to 50ms after 1500ms continuous hold, then 2ms after 3000ms
+- Auto-repeat on btn6/btn7: same acceleration logic as FocusLight
 - btn8: Start → Pause → Resume cycle
   - Start: begins countdown, relay ON, LED8 (position 7) ON
   - Pause: halts countdown, relay OFF, LED8 OFF, saves remaining time
   - Resume: resumes from paused time, relay ON, LED8 ON
 - When countdown reaches 0, relay turns OFF, LED8 OFF, display shows normal state
 - Buzzer: long beep every 10 seconds
-  - Note: `exposureTimerBuzzerUpdate()` exists but is **not called** in `loop()` yet.
+
+### Base Exposure / F-Stop Mode (btn3/btn4)
+- **btn3**: Toggles Base Exposure mode.
+  - Sets current exposure time as the "Base" value.
+  - Display splits: Left side shows "BASE" (if value == base) or f-stop difference (e.g., "-1.00", " 0.33"); Right side shows time.
+  - LEDs 3-7 indicate the selected f-stop step size.
+- **btn4**: Cycles f-stop step sizes (1.0, 0.5, 0.33, 0.17, 0.08).
+  - Briefly displays "STEP X.XX" (e.g., "STEP 0.33") for 1 second.
+  - Step size selection is persistent.
 
 ### Normal State
-- Displays current `exposureTimerValue` (right-aligned to 8 chars)
-- All LEDs off, relay OFF
+- Displays current `exposureTimerValue` (right-aligned, 1 decimal place, e.g., "   12.5")
+- If Base Exposure is set: shows split display (Diff + Time) and LEDs 3-7 active
+- Relay OFF
 - Shown when no timers are running
 
 ### Cancel (btn1)
 - Single-press only (ignores continuous hold)
 - Stops any running/paused timer, displays " CANCEL " for 500ms, returns to normal state
-- Preserves `exposureTimerValue` for next timer session
+- Preserves `exposureTimerValue` and Base Exposure settings
 
 ## Timing constants (all in milliseconds)
 - `CONTINUOUS_PRESS_THRESHOLD`: 300
@@ -64,9 +75,11 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 ## Button mappings
 - btn1 (bit 1): Cancel all timers
 - btn2 (bit 2): FocusLight Timer control
-- btn3–btn5 (bits 4, 8, 16): Currently unused
-- btn6 (bit 32): Decrease Exposure Timer value
-- btn7 (bit 64): Increase Exposure Timer value
+- btn3 (bit 4): Set/Unset Base Exposure (toggle F-Stop Mode)
+- btn4 (bit 8): Cycle f-stop step size
+- btn5 (bit 16): Currently unused
+- btn6 (bit 32): Decrease Exposure Timer value (seconds or f-stops)
+- btn7 (bit 64): Increase Exposure Timer value (seconds or f-stops)
 - btn8 (bit 128): Start/Pause/Resume Exposure Timer countdown
 
 ## Code structure & patterns

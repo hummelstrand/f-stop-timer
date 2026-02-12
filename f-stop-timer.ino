@@ -103,6 +103,20 @@ bool btn6PressHandled = false; // For single press on btn6 (decrease)
 bool btn7PressHandled = false; // For single press on btn7 (increase)
 bool btn8PressHandled = false; // For single press on btn8 (start/pause/resume)
 
+// Base Exposure & F-Stop Mode
+float baseExposureValue = 0.0f;
+bool baseExposureSet = false;
+int fStopStepIndex = 0; // 0=1.000, 1=0.500, 2=0.333, 3=0.167, 4=0.083
+const float F_STOP_STEPS[] = {1.0f, 0.5f, 0.333333f, 0.166667f, 0.083333f};
+// We will calculate display values dynamically based on difference
+bool btn3PressHandled = false;
+bool btn4PressHandled = false;
+
+// Step Display State
+unsigned long stepDisplayStartTime = 0;
+const unsigned long STEP_DISPLAY_DURATION = 1000;
+bool stepDisplayActive = false;
+
 // Buzzer timing state
 unsigned long focusLastShortBeepSecond = 0;
 unsigned long focusLastLongBeepSecond = 0;
@@ -387,14 +401,94 @@ void exposureTimerBuzzerUpdate(void) {
   }
 }
 
-// Set the normal state: display exposureTimer value, relay off, all LEDs off
+// Set the normal state: display exposureTimer value, relay off, all LEDs off (except F-Stop mode indicators)
 void setNormalState() {
   hwSetRelay(false);
-  hwSetLEDs(0x00);
-  char expDisp[10];
+  
+  // Set LEDs based on mode
+  if (baseExposureSet) {
+    // Determine which LED to light up based on F-Stop Step
+    // LED3 (pos 2) to LED7 (pos 6)
+    // fStopStepIndex: 0->LED3, 1->LED4, 2->LED5, 3->LED6, 4->LED7
+    uint8_t ledPattern = 0;
+    if (fStopStepIndex >= 0 && fStopStepIndex <= 4) {
+      ledPattern = (1 << (fStopStepIndex + 2));
+    }
+    hwSetLEDs(ledPattern);
+  } else {
+    hwSetLEDs(0x00);
+  }
+
+  char finalDisplay[17]; // Buffer for final display string
+  
+  if (stepDisplayActive) {
+      // Show "STEP X.XX" briefly (e.g. STEP 1.00, STEP 0.33)
+      snprintf(finalDisplay, sizeof(finalDisplay), "STEP %.2f", F_STOP_STEPS[fStopStepIndex]);
+      hwDisplayText(finalDisplay);
+      return; 
+  }
+  
+  // Format the time part (right side)
   float displayExposure = roundToTenth(exposureTimerValue);
-  formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayExposure);
-  hwDisplayText(expDisp);
+  char timePart[10];
+  snprintf(timePart, sizeof(timePart), "%.1f", displayExposure);
+
+  // Determine what to show on the left
+  char leftPart[10] = "";
+  bool showSplit = false;
+
+  if (baseExposureSet) {
+    // Show Base/Diff
+    showSplit = true;
+    // Check if exposure equals base exposure (within small epsilon)
+    if (fabs(exposureTimerValue - baseExposureValue) < 0.001f) {
+      strcpy(leftPart, "BASE");
+    } else {
+      // Calculate f-stop difference
+      // f-stops = log2(current / base)
+      // log2(x) = ln(x) / ln(2)
+      if (baseExposureValue > 0) {
+        float fStops = log10(exposureTimerValue / baseExposureValue) / log10(2.0f);
+        // Use precision 2 with space flag for positive numbers to ensure alignment
+        snprintf(leftPart, sizeof(leftPart), "% .2f", fStops);
+      } else {
+        strcpy(leftPart, "ERR");
+      }
+    }
+  }
+
+  if (showSplit) {
+    // Combine left and time parts with alignment
+    // Calculate visible lengths (ignoring '.' characters)
+    int leftVis = 0;
+    for(int i=0; leftPart[i]; i++) if(leftPart[i] != '.') leftVis++;
+    
+    int timeVis = 0;
+    for(int i=0; timePart[i]; i++) if(timePart[i] != '.') timeVis++;
+    
+    int spaces = 8 - leftVis - timeVis;
+    if (spaces < 1) spaces = 1; // Ensure at least one space
+    
+    // Construct final string
+    strcpy(finalDisplay, leftPart);
+    size_t currentLen = strlen(finalDisplay);
+    for(int i = 0; i < spaces && currentLen < sizeof(finalDisplay) - 1; i++) {
+        finalDisplay[currentLen++] = ' ';
+    }
+    finalDisplay[currentLen] = '\0';
+    
+    // Check if we have room to concatenate timePart
+    if (currentLen + strlen(timePart) < sizeof(finalDisplay)) {
+        strcat(finalDisplay, timePart);
+    }
+    
+    hwDisplayText(finalDisplay);
+
+  } else {
+    // Normal mode: just Right Aligned time
+    formatRightAlignedDecimal(finalDisplay, sizeof(finalDisplay), displayExposure);
+    hwDisplayText(finalDisplay);
+  }
 }
 
 // ============================================================================
@@ -525,11 +619,65 @@ void loop() {
       }
       break;
     
+    // ===== BTN3: Set/Unset Base Exposure =====
+    case btn3:
+      if (focusTimerRunning || exposureTimerRunning) break; // Inactive during timer run
+      
+      if (!btn3PressHandled) {
+        btn3PressHandled = true;
+        
+        if (baseExposureSet) {
+          // Toggle OFF
+          baseExposureSet = false;
+          // Preserve fStopStepIndex for next use
+        } else {
+          // Toggle ON
+          baseExposureSet = true;
+          baseExposureValue = exposureTimerValue;
+          // Reuse existing fStopStepIndex
+        }
+        setNormalState();
+      }
+      break;
+
+    // ===== BTN4: Cycle F-Stop Steps =====
+    case btn4:
+      // Cycle steps for F-Stop mode
+      // Only active if F-Stop Mode (Base Exposure) is set
+      if (focusTimerRunning || exposureTimerRunning) break;
+
+      if (!btn4PressHandled) {
+          btn4PressHandled = true;
+          
+          if (baseExposureSet) {
+            fStopStepIndex++;
+            if (fStopStepIndex > 4) fStopStepIndex = 0;
+            
+            // Trigger temporary display of the selected step
+            stepDisplayActive = true;
+            stepDisplayStartTime = millis();
+            
+            setNormalState(); // Update display immediately
+          }
+      }
+      break;
+
+    // ===== BTN5: Unused =====
+    case btn5:
+      break;
+    
     // ===== BTN6: Decrease exposureTimer value (with auto-repeat) =====
     case btn6:
       if (focusTimerRunning || exposureTimerRunning) {
         break; // Ignore when any timer is running
       }
+      
+      // Stop temporary step display if it's active so user sees effect immediately
+      if (stepDisplayActive) {
+         stepDisplayActive = false;
+         setNormalState();
+      }
+
       if (!exposureTimerRunning && !exposureTimerPaused) {
         bool shouldDecrement = false;
         
@@ -554,14 +702,21 @@ void loop() {
         }
         
         if (shouldDecrement) {
-          exposureTimerValue -= EXPOSURE_TIMER_STEP;
+          if (baseExposureSet) {
+             // F-Stop Mode: decrease by fStopStep
+             float steps = F_STOP_STEPS[fStopStepIndex];
+             // Math: NewTime = OldTime / 2^(steps)  (for decrease)
+             // Formula: t1 = t0 * 2^steps. Decrease means multiply by 2^(-steps)
+             exposureTimerValue = exposureTimerValue * pow(2.0f, -steps);
+          } else {
+             // Seconds Mode: decrease by 0.1s
+             exposureTimerValue -= EXPOSURE_TIMER_STEP;
+          }
+
           if (exposureTimerValue < MIN_EXPOSURE_TIMER_SECONDS) {
             exposureTimerValue = MIN_EXPOSURE_TIMER_SECONDS;
           }
-          char expDisp6[10];
-          float displayExposure6 = roundToTenth(exposureTimerValue);
-          formatRightAlignedDecimal(expDisp6, sizeof(expDisp6), displayExposure6);
-          hwDisplayText(expDisp6);
+          setNormalState(); // Update display (centralized)
         }
       }
       break;
@@ -571,6 +726,13 @@ void loop() {
       if (focusTimerRunning || exposureTimerRunning) {
         break; // Ignore when any timer is running
       }
+      
+      // Stop temporary step display if it's active so user sees effect immediately
+      if (stepDisplayActive) {
+         stepDisplayActive = false;
+         setNormalState();
+      }
+
       if (!exposureTimerRunning && !exposureTimerPaused) {
         bool shouldIncrement = false;
         
@@ -595,14 +757,20 @@ void loop() {
         }
         
         if (shouldIncrement) {
-          exposureTimerValue += EXPOSURE_TIMER_STEP;
+          if (baseExposureSet) {
+             // F-Stop Mode: increase by fStopStep
+             float steps = F_STOP_STEPS[fStopStepIndex];
+             // Math: NewTime = OldTime * 2^(steps)
+             exposureTimerValue = exposureTimerValue * pow(2.0f, steps);
+          } else {
+             // Seconds Mode: increase by 0.1s
+             exposureTimerValue += EXPOSURE_TIMER_STEP;
+          }
+
           if (exposureTimerValue > MAX_EXPOSURE_TIMER_SECONDS) {
             exposureTimerValue = MAX_EXPOSURE_TIMER_SECONDS;
           }
-          char expDisp7[10];
-          float displayExposure7 = roundToTenth(exposureTimerValue);
-          formatRightAlignedDecimal(expDisp7, sizeof(expDisp7), displayExposure7);
-          hwDisplayText(expDisp7);
+           setNormalState(); // Update display (centralized)
         }
       }
       break;
@@ -612,6 +780,12 @@ void loop() {
       if (focusTimerRunning) {
         break; // FocusLight timer running: ignore btn8
       }
+      
+      // Stop temporary step display
+      if (stepDisplayActive) {
+         stepDisplayActive = false;
+      }
+
       if (!btn8PressHandled) {
         btn8PressHandled = true;
         if (!exposureTimerRunning && !exposureTimerPaused) {
@@ -665,6 +839,8 @@ void loop() {
       // Reset all button press handlers
       btn1PressHandled = false;
       btn2PressHandled = false;
+      btn3PressHandled = false;
+      btn4PressHandled = false;
       btn6PressHandled = false;
       btn7PressHandled = false;
       btn8PressHandled = false;
@@ -690,6 +866,17 @@ void loop() {
   // Update FocusLight Timer display if running (and not being handled by btn2)
   if (focusTimerRunning && buttons != btn2) {
     focusTimerUpdate();
+  }
+
+  // Handle temporary step display timeout
+  if (stepDisplayActive) {
+      if (millis() - stepDisplayStartTime > STEP_DISPLAY_DURATION) {
+          stepDisplayActive = false;
+          // Refresh display if not running exposure timer
+          if (!exposureTimerRunning && !focusTimerRunning && !exposureTimerPaused) {
+             setNormalState();
+          }
+      }
   }
   
   // Update Exposure Timer countdown
