@@ -31,7 +31,7 @@ void setNormalState();
 #define BUZZER_PIN 16 // Buzzer control pin
 
 // App version
-const char APP_VERSION[] = "VERS 0.9.0";
+const char APP_VERSION[] = "VERS 0.9.1";
 const unsigned long VERSION_DISPLAY_MS = 1100;
 const unsigned long STARTUP_ALL_ON_MS = 400;
 
@@ -531,6 +531,124 @@ void setup() {
   Serial.println("Button 3: Turn relay OFF");
 }
 
+// ============================================================================
+// HELPER FUNCTIONS TO SIMPLIFY COMPLICATED LOGIC
+// ============================================================================
+
+// Helper to display a time value right-aligned
+void displayTime(float timeVal) {
+  char buf[16];
+  formatRightAlignedDecimal(buf, sizeof(buf), roundToTenth(timeVal));
+  hwDisplayText(buf);
+}
+
+// Logic for increasing/decreasing exposure time (btn6/btn7)
+void handleExposureChange(bool increase, bool isContinuousPress, bool &pressHandled) {
+  bool shouldChange = false;
+  
+  // First press
+  if (!pressHandled) {
+    pressHandled = true;
+    shouldChange = true;
+    lastAutoRepeatTime = millis();
+  }
+  // Auto-repeat logic
+  else if (isContinuousPress) {
+    unsigned long holdDuration = millis() - buttonPressStartTime;
+    unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_ULTRA_THRESHOLD)
+      ? AUTO_REPEAT_INTERVAL_ULTRA
+      : (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD)
+        ? AUTO_REPEAT_INTERVAL_FAST
+        : AUTO_REPEAT_INTERVAL;
+        
+    if (millis() - lastAutoRepeatTime >= repeatInterval) {
+      shouldChange = true;
+      lastAutoRepeatTime = millis();
+    }
+  }
+
+  if (shouldChange) {
+    if (baseExposureSet) {
+       // F-Stop Mode: increase/decrease by fStopStep factor
+       float steps = F_STOP_STEPS[fStopStepIndex];
+       float factor = pow(2.0f, increase ? steps : -steps);
+       exposureTimerValue *= factor;
+    } else {
+       // Seconds Mode: +/- 0.1s
+       if (increase) exposureTimerValue += EXPOSURE_TIMER_STEP;
+       else exposureTimerValue -= EXPOSURE_TIMER_STEP;
+    }
+
+    // Bounds check
+    if (exposureTimerValue < MIN_EXPOSURE_TIMER_SECONDS) exposureTimerValue = MIN_EXPOSURE_TIMER_SECONDS;
+    if (exposureTimerValue > MAX_EXPOSURE_TIMER_SECONDS) exposureTimerValue = MAX_EXPOSURE_TIMER_SECONDS;
+    
+    setNormalState();
+  }
+}
+
+void startExposureTimer() {
+  if (focusTimerRunning || focusTimerElapsed > 0) {
+    focusTimerClear();
+  }
+  exposureTimerRunning = true;
+  exposureTimerPaused = false;
+  exposureTimerCountdown = exposureTimerValue;
+  exposureBeepAccumulatedMs = 0;
+  exposureLastLongBeepSecond = 0;
+  exposureTimerStartTime = millis();
+  hwSetRelay(true);
+  hwSetLED(7, 1);  // LED8 ON
+  displayTime(exposureTimerCountdown);
+}
+
+void pauseExposureTimer() {
+  exposureTimerRunning = false;
+  exposureTimerPaused = true;
+  
+  // Account for elapsed time
+  unsigned long elapsed = millis() - exposureTimerStartTime;
+  exposureBeepAccumulatedMs += elapsed;
+  exposureTimerCountdown -= (float)elapsed / 1000.0f;
+  if (exposureTimerCountdown < 0.0f) exposureTimerCountdown = 0.0f;
+  
+  hwSetRelay(false);
+  hwSetLED(7, 0);  // LED8 OFF
+  displayTime(exposureTimerCountdown);
+}
+
+void resumeExposureTimer() {
+  exposureTimerRunning = true;
+  exposureTimerPaused = false;
+  exposureTimerStartTime = millis();
+  hwSetRelay(true);
+  hwSetLED(7, 1);  // LED8 ON
+  displayTime(exposureTimerCountdown);
+}
+
+void stopExposureTimer() {
+  exposureTimerRunning = false;
+  exposureTimerPaused = false;
+  exposureTimerCountdown = 0.0f;
+  exposureBeepAccumulatedMs = 0;
+  exposureLastLongBeepSecond = 0;
+  hwSetRelay(false);
+  hwSetLED(7, 0);  // LED8 OFF
+  setNormalState();
+}
+
+void updateExposureTimer() {
+  if (exposureTimerRunning) {
+    unsigned long elapsed = millis() - exposureTimerStartTime;
+    float remaining = exposureTimerCountdown - (float)elapsed / 1000.0f;
+    if (remaining <= 0.0f) {
+      stopExposureTimer();
+    } else {
+      displayTime(remaining);
+    }
+  }
+}
+
 void loop() {
   // Read button state
   uint8_t buttons = hwReadButton();
@@ -550,27 +668,15 @@ void loop() {
         btn1PressHandled = true;
         bool anyCancelled = false;
         
-        // Stop FocusLight Timer if running
         if (focusTimerRunning || focusTimerElapsed > 0) {
-          focusTimerRunning = false;
-          focusTimerElapsed = 0;
-          hwSetRelay(false);
+          focusTimerClear();
           anyCancelled = true;
-          Serial.println("FocusLight Timer cancelled");
         }
-        // Stop Exposure Timer if running or paused
         if (exposureTimerRunning || exposureTimerPaused) {
-          exposureTimerRunning = false;
-          exposureTimerPaused = false;
-          exposureTimerCountdown = 0.0f;
-          exposureBeepAccumulatedMs = 0;
-          exposureLastLongBeepSecond = 0;
-          hwSetRelay(false);
+          stopExposureTimer();
           anyCancelled = true;
-          Serial.println("Exposure Timer cancelled");
         }
         
-        // If anything was cancelled, turn off LEDs immediately, show Cancel, then normal state
         if (anyCancelled) {
           hwSetLEDs(0x00);  // Turn off all LEDs immediately
           hwDisplayText(" CANCEL ");
@@ -582,37 +688,22 @@ void loop() {
     
     // ===== BTN2: FocusLight Timer (continuous press to run, short press to toggle) =====
     case btn2:
-      if (exposureTimerRunning) {
-        break; // Exposure timer running: ignore btn2
-      }
+      if (exposureTimerRunning) break; 
+      
       if (isContinuousPress) {
-        // Continuous press: Start timer and keep it running while pressed
         if (!focusTimerRunning) {
-          if (exposureTimerPaused) {
-            exposureTimerPaused = false;
-            exposureTimerCountdown = 0.0f;
-            exposureBeepAccumulatedMs = 0;
-            exposureLastLongBeepSecond = 0;
-            hwSetRelay(false);
-            hwSetLED(7, 0);  // LED8 OFF
-          }
+          if (exposureTimerPaused) stopExposureTimer();
           focusTimerStart();
         }
         focusTimerUpdate();
       } else if (!btn2PressHandled) {
-        // Short press: Toggle timer (start or clear)
         btn2PressHandled = true;
         if (focusTimerRunning || focusTimerElapsed > 0) {
           focusTimerClear();
         } else {
-          if (exposureTimerRunning || exposureTimerPaused) {
-            exposureTimerRunning = false;
-            exposureTimerPaused = false;
-            exposureTimerCountdown = 0.0f;
-            exposureBeepAccumulatedMs = 0;
-            exposureLastLongBeepSecond = 0;
-            hwSetRelay(false);
-          }
+          // If exposure timer logic was active, clear it first
+          if (exposureTimerRunning || exposureTimerPaused) stopExposureTimer();
+          
           focusTimerStart();
           focusTimerUpdate();
         }
@@ -668,168 +759,46 @@ void loop() {
     
     // ===== BTN6: Decrease exposureTimer value (with auto-repeat) =====
     case btn6:
-      if (focusTimerRunning || exposureTimerRunning) {
-        break; // Ignore when any timer is running
-      }
+      if (focusTimerRunning || exposureTimerRunning) break;
       
-      // Stop temporary step display if it's active so user sees effect immediately
       if (stepDisplayActive) {
          stepDisplayActive = false;
          setNormalState();
       }
 
       if (!exposureTimerRunning && !exposureTimerPaused) {
-        bool shouldDecrement = false;
-        
-        // First press
-        if (!btn6PressHandled) {
-          btn6PressHandled = true;
-          shouldDecrement = true;
-          lastAutoRepeatTime = millis();
-        }
-        // Auto-repeat after threshold (use fast interval after prolonged press)
-        else if (isContinuousPress) {
-          unsigned long holdDuration = millis() - buttonPressStartTime;
-          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_ULTRA_THRESHOLD)
-            ? AUTO_REPEAT_INTERVAL_ULTRA
-            : (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD)
-              ? AUTO_REPEAT_INTERVAL_FAST
-              : AUTO_REPEAT_INTERVAL;
-          if (millis() - lastAutoRepeatTime >= repeatInterval) {
-            shouldDecrement = true;
-            lastAutoRepeatTime = millis();
-          }
-        }
-        
-        if (shouldDecrement) {
-          if (baseExposureSet) {
-             // F-Stop Mode: decrease by fStopStep
-             float steps = F_STOP_STEPS[fStopStepIndex];
-             // Math: NewTime = OldTime / 2^(steps)  (for decrease)
-             // Formula: t1 = t0 * 2^steps. Decrease means multiply by 2^(-steps)
-             exposureTimerValue = exposureTimerValue * pow(2.0f, -steps);
-          } else {
-             // Seconds Mode: decrease by 0.1s
-             exposureTimerValue -= EXPOSURE_TIMER_STEP;
-          }
-
-          if (exposureTimerValue < MIN_EXPOSURE_TIMER_SECONDS) {
-            exposureTimerValue = MIN_EXPOSURE_TIMER_SECONDS;
-          }
-          setNormalState(); // Update display (centralized)
-        }
+        handleExposureChange(false, isContinuousPress, btn6PressHandled);
       }
       break;
     
     // ===== BTN7: Increase exposureTimer value (with auto-repeat) =====
     case btn7:
-      if (focusTimerRunning || exposureTimerRunning) {
-        break; // Ignore when any timer is running
-      }
+      if (focusTimerRunning || exposureTimerRunning) break;
       
-      // Stop temporary step display if it's active so user sees effect immediately
       if (stepDisplayActive) {
          stepDisplayActive = false;
          setNormalState();
       }
 
       if (!exposureTimerRunning && !exposureTimerPaused) {
-        bool shouldIncrement = false;
-        
-        // First press
-        if (!btn7PressHandled) {
-          btn7PressHandled = true;
-          shouldIncrement = true;
-          lastAutoRepeatTime = millis();
-        }
-        // Auto-repeat after threshold (use fast interval after prolonged press)
-        else if (isContinuousPress) {
-          unsigned long holdDuration = millis() - buttonPressStartTime;
-          unsigned long repeatInterval = (holdDuration >= AUTO_REPEAT_ULTRA_THRESHOLD)
-            ? AUTO_REPEAT_INTERVAL_ULTRA
-            : (holdDuration >= AUTO_REPEAT_FAST_THRESHOLD)
-              ? AUTO_REPEAT_INTERVAL_FAST
-              : AUTO_REPEAT_INTERVAL;
-          if (millis() - lastAutoRepeatTime >= repeatInterval) {
-            shouldIncrement = true;
-            lastAutoRepeatTime = millis();
-          }
-        }
-        
-        if (shouldIncrement) {
-          if (baseExposureSet) {
-             // F-Stop Mode: increase by fStopStep
-             float steps = F_STOP_STEPS[fStopStepIndex];
-             // Math: NewTime = OldTime * 2^(steps)
-             exposureTimerValue = exposureTimerValue * pow(2.0f, steps);
-          } else {
-             // Seconds Mode: increase by 0.1s
-             exposureTimerValue += EXPOSURE_TIMER_STEP;
-          }
-
-          if (exposureTimerValue > MAX_EXPOSURE_TIMER_SECONDS) {
-            exposureTimerValue = MAX_EXPOSURE_TIMER_SECONDS;
-          }
-           setNormalState(); // Update display (centralized)
-        }
+        handleExposureChange(true, isContinuousPress, btn7PressHandled);
       }
       break;
     
     // ===== BTN8: Start/Pause/Resume exposureTimer countdown =====
     case btn8:
-      if (focusTimerRunning) {
-        break; // FocusLight timer running: ignore btn8
-      }
+      if (focusTimerRunning) break;
       
-      // Stop temporary step display
-      if (stepDisplayActive) {
-         stepDisplayActive = false;
-      }
+      if (stepDisplayActive) stepDisplayActive = false;
 
       if (!btn8PressHandled) {
         btn8PressHandled = true;
         if (!exposureTimerRunning && !exposureTimerPaused) {
-          // Start exposure timer countdown
-          if (focusTimerRunning || focusTimerElapsed > 0) {
-            focusTimerClear();
-          }
-          exposureTimerRunning = true;
-          exposureTimerPaused = false;
-          exposureTimerCountdown = exposureTimerValue;
-          exposureBeepAccumulatedMs = 0;
-          exposureLastLongBeepSecond = 0;
-          exposureTimerStartTime = millis();
-          hwSetRelay(true);
-          hwSetLED(7, 1);  // LED8 ON (position 7)
-          char expDisp8[10];
-          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
-          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwDisplayText(expDisp8);
+          startExposureTimer();
         } else if (exposureTimerRunning) {
-          // Pause exposure timer
-          exposureTimerRunning = false;
-          exposureTimerPaused = true;
-          unsigned long elapsed = millis() - exposureTimerStartTime;
-          exposureBeepAccumulatedMs += elapsed;
-          exposureTimerCountdown -= (float)elapsed / 1000.0f;
-          if (exposureTimerCountdown < 0.0f) exposureTimerCountdown = 0.0f;
-          hwSetRelay(false);
-          hwSetLED(7, 0);  // LED8 OFF (position 7)
-          char expDisp8[10];
-          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
-          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwDisplayText(expDisp8);
+          pauseExposureTimer();
         } else if (exposureTimerPaused) {
-          // Resume exposure timer
-          exposureTimerRunning = true;
-          exposureTimerPaused = false;
-          exposureTimerStartTime = millis();
-          hwSetRelay(true);
-          hwSetLED(7, 1);  // LED8 ON (position 7)
-          char expDisp8[10];
-          float displayCountdown8 = roundToTenth(exposureTimerCountdown);
-          formatRightAlignedDecimal(expDisp8, sizeof(expDisp8), displayCountdown8);
-          hwDisplayText(expDisp8);
+          resumeExposureTimer();
         }
       }
       break;
@@ -880,27 +849,7 @@ void loop() {
   }
   
   // Update Exposure Timer countdown
-  if (exposureTimerRunning) {
-    unsigned long elapsed = millis() - exposureTimerStartTime;
-    float remaining = exposureTimerCountdown - (float)elapsed / 1000.0f;
-    if (remaining <= 0.0f) {
-      // Timer finished
-      exposureTimerRunning = false;
-      exposureTimerPaused = false;
-      exposureTimerCountdown = 0.0f;
-      exposureBeepAccumulatedMs = 0;
-      exposureLastLongBeepSecond = 0;
-      hwSetRelay(false);
-      hwSetLED(7, 0);  // LED8 OFF (position 7)
-      setNormalState();
-    } else {
-      // Update display with remaining time
-      char expDisp[10];
-      float displayRemaining = roundToTenth(remaining);
-      formatRightAlignedDecimal(expDisp, sizeof(expDisp), displayRemaining);
-      hwDisplayText(expDisp);
-    }
-  }
+  updateExposureTimer();
 
   // Update buzzer patterns
   focusTimerBuzzerUpdate();
