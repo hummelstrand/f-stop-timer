@@ -86,9 +86,10 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - **Hardware Interface**: `hwSetDisplay()`, `hwSetLED()`, `hwSetLEDs()`, `hwSetRelay()`, `hwReadButton()`, `hwCheckContinuousPress()` provide abstraction layer
 - **Button press tracking**: Each button has a `btnXPressHandled` flag; reset on button release
 - **Continuous press detection**: `hwCheckContinuousPress()` manages `continuousPressDetected`, `buttonPressStartTime`, `lastAutoRepeatTime`
-- **Timer functions**: `focusTimerStart()`, `focusTimerStop()`, `focusTimerClear()`, `focusTimerUpdate()` handle FocusLight logic
+- **Focus Timer functions**: `focusTimerStart()`, `focusTimerStop()`, `focusTimerClear()`, `focusTimerUpdate()` handle FocusLight logic
+- **Exposure Timer functions**: `startExposureTimer()`, `pauseExposureTimer()`, `resumeExposureTimer()`, `stopExposureTimer()`, `updateExposureTimer()`, `handleExposureChange()` encapsulate exposure logic
 - **Normal state**: `setNormalState()` centralizes display/relay/LED reset
-- **Loop structure**: Button handling in switch/case, then timer updates, then state tracking
+- **Loop structure**: Button handling in switch/case delegates to helper functions; `updateExposureTimer()` called explicitly
 
 ## Integration points & dependencies
 - Local library: `libraries/TM1638plus/` — API used: `displayText()`, `readButtons()`, `setLED()`, `setLEDs()`, `displayBegin()`
