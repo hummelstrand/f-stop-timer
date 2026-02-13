@@ -7,7 +7,7 @@ This project is heavily indebted to Gavin Lyons https://github.com/glyons/Darkro
 - **Focus Light Control:** Relay control with count-up timer (great for burning in with additional exposure without having to set a timer). Automatic shut-off after 120s. Toggle on/off or hold down the button to run and release to stop.
 - **Exposure Timer:** Count-down timer with relay control. ADJUSTABLE in two modes:
     - **Seconds Mode:** Increase/decrease time in 0.1s increments.
-    - **F-Stop Mode:** Set a "Base Exposure" and increase/decrease time in f-stop steps (e.g., +1 stop, -0.5 stop).
+    - **F-Stop Mode:** Set a "Base Exposure" and increase/decrease time in f-stop steps (e.g., +1 stop, -0.5 stop, etcetera).
 - **F-Stop Logic:**
     - **Base Exposure (btn3):** Sets the current time as the base. Display shows difference in stops (e.g., "-1.00", " 0.33") and the calculated time.
     - **Step Selection (btn4):** Cycle between step sizes: 1.0, 0.5, 0.33, 0.17, 0.08 stops. Selection is persistent.

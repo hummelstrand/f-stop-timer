@@ -31,7 +31,7 @@ void setNormalState();
 #define BUZZER_PIN 16 // Buzzer control pin
 
 // App version
-const char APP_VERSION[] = "VERS 0.1.0";
+const char APP_VERSION[] = "VERS 0.9.0";
 const unsigned long VERSION_DISPLAY_MS = 1100;
 const unsigned long STARTUP_ALL_ON_MS = 400;
 
