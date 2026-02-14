@@ -1,7 +1,7 @@
 # Agent instructions for F-Stop Timer
 
 ## Quick context
-This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown). Legacy sketches live in the `legacy_darkroom_timer/` folder. A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
+This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown). A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
 
 ## Big picture
 - Hardware: TM1638 module with 8 buttons, 8 LEDs. A ESP12-1R-MV board with 230 V relay. An external buzzer.

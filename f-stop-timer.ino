@@ -118,7 +118,6 @@ const unsigned long STEP_DISPLAY_DURATION = 1000;
 bool stepDisplayActive = false;
 
 // Buzzer timing state
-unsigned long focusLastShortBeepSecond = 0;
 unsigned long focusLastLongBeepSecond = 0;
 unsigned long exposureLastLongBeepSecond = 0;
 unsigned long exposureBeepAccumulatedMs = 0;
@@ -299,7 +298,6 @@ bool hwCheckContinuousPress(uint8_t buttonValue, unsigned long duration) {
 void focusTimerStart(void) {
   focusTimerRunning = true;
   focusTimerStartTime = millis();
-  focusLastShortBeepSecond = 0;
   focusLastLongBeepSecond = 0;
   hwSetRelay(true);
   Serial.println("FocusLight Timer started");
@@ -311,7 +309,6 @@ void focusTimerStart(void) {
 void focusTimerStop(void) {
   focusTimerRunning = false;
   hwSetRelay(false);
-  focusLastShortBeepSecond = 0;
   focusLastLongBeepSecond = 0;
   Serial.println("FocusLight Timer stopped");
 }
@@ -323,7 +320,6 @@ void focusTimerClear(void) {
   focusTimerRunning = false;
   focusTimerElapsed = 0;
   hwSetRelay(false);
-  focusLastShortBeepSecond = 0;
   focusLastLongBeepSecond = 0;
   setNormalState();
   Serial.println("FocusLight Timer cleared");
@@ -365,7 +361,6 @@ float focusTimerUpdate(void) {
 
 /*
   Buzzer updates for FocusLight Timer
-  - Short beep every second
   - Long beep every 10 seconds
 */
 void focusTimerBuzzerUpdate(void) {
@@ -377,10 +372,6 @@ void focusTimerBuzzerUpdate(void) {
   if (elapsedSeconds % 10 == 0 && elapsedSeconds != focusLastLongBeepSecond) {
     hwBeepLong();
     focusLastLongBeepSecond = elapsedSeconds;
-    focusLastShortBeepSecond = elapsedSeconds; // Avoid double beep on 10s
-  } else if (elapsedSeconds != focusLastShortBeepSecond) {
-    hwBeepShort();
-    focusLastShortBeepSecond = elapsedSeconds;
   }
 }
 
