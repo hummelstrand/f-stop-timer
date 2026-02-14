@@ -10,7 +10,7 @@ This project is heavily indebted to Gavin Lyons https://github.com/glyons/Darkro
     - **F-Stop Mode:** Set a "Base Exposure" and increase/decrease time in f-stop steps (e.g., +1 stop, -0.5 stop, etcetera).
 - **F-Stop Logic:**
     - **Base Exposure (btn3):** Sets the current time as the base. Display shows difference in stops (e.g., "-1.00", " 0.33") and the calculated time.
-    - **Step Selection (btn4):** Cycle between step sizes: 1.0, 0.5, 0.33, 0.17, 0.08 stops. Selection is persistent.
+    - **Step Selection (btn4):** Cycle between step sizes: 1.0 (1/1), 0.5 (1/2), 0.33 (1/3), 0.25 (1/4), and 0.17 (1/6) stops. 
     - **LED Indication:** LEDs 3-7 indicate the selected step size when in F-Stop Mode.
 - **Cancel Button:** Stops all timers and returns to normal state.
 - **Audio Feedback:** Short beep every second for FocusLight. Long beep every 10 seconds for both timers.

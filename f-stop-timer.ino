@@ -106,8 +106,8 @@ bool btn8PressHandled = false; // For single press on btn8 (start/pause/resume)
 // Base Exposure & F-Stop Mode
 float baseExposureValue = 0.0f;
 bool baseExposureSet = false;
-int fStopStepIndex = 0; // 0=1.000, 1=0.500, 2=0.333, 3=0.167, 4=0.083
-const float F_STOP_STEPS[] = {1.0f, 0.5f, 0.333333f, 0.166667f, 0.083333f};
+int fStopStepIndex = 0; // 0=1.000, 1=0.500, 2=0.333, 3=0.250, 4=0.167
+const float F_STOP_STEPS[] = {1.0f, 0.5f, 0.333333f, 0.25f, 0.166667f};
 // We will calculate display values dynamically based on difference
 bool btn3PressHandled = false;
 bool btn4PressHandled = false;
@@ -336,7 +336,7 @@ void focusTimerClear(void) {
 float focusTimerUpdate(void) {
   if (focusTimerRunning) {
     focusTimerElapsed = millis() - focusTimerStartTime;
-    hwSetLED(1, 1); // LED2 ON (position 1)
+    hwSetLED(0, 1); // LED1 ON (position 0)
   }
 
   float secs = focusTimerElapsed / 1000.0f;
@@ -354,9 +354,9 @@ float focusTimerUpdate(void) {
   sprintf(displayBuffer, "FOC  %4.1f", displaySecs);
   hwDisplayText(displayBuffer);
 
-  // If timer is not running, turn off LED2 and restore default display
+  // If timer is not running, turn off LED1 and restore default display
   if (!focusTimerRunning) {
-    hwSetLED(1, 0); // LED2 OFF (position 1)
+    hwSetLED(0, 0); // LED1 OFF (position 0)
     setNormalState();
   }
 
@@ -391,13 +391,17 @@ void focusTimerBuzzerUpdate(void) {
 void exposureTimerBuzzerUpdate(void) {
   if (!exposureTimerRunning) return;
 
-  unsigned long totalElapsedMs = exposureBeepAccumulatedMs + (millis() - exposureTimerStartTime);
-  unsigned long elapsedSeconds = totalElapsedMs / 1000;
-  if (elapsedSeconds == 0) return;
-
-  if (elapsedSeconds % 10 == 0 && elapsedSeconds != exposureLastLongBeepSecond) {
+  unsigned long elapsedMs = millis() - exposureTimerStartTime;
+  float remaining = exposureTimerCountdown - (float)elapsedMs / 1000.0f;
+  
+  if (remaining < 0) remaining = 0;
+  
+  // Round up to get the current "second block" we are in (e.g. 19.9s -> 20)
+  unsigned long remainingSeconds = (unsigned long)ceil(remaining);
+  
+  if (remainingSeconds > 0 && remainingSeconds % 10 == 0 && remainingSeconds != exposureLastLongBeepSecond) {
     hwBeepLong();
-    exposureLastLongBeepSecond = elapsedSeconds;
+    exposureLastLongBeepSecond = remainingSeconds;
   }
 }
 
@@ -467,7 +471,7 @@ void setNormalState() {
     for(int i=0; timePart[i]; i++) if(timePart[i] != '.') timeVis++;
     
     int spaces = 8 - leftVis - timeVis;
-    if (spaces < 1) spaces = 1; // Ensure at least one space
+    if (spaces < 0) spaces = 0; // Allow zero spaces if needed to fit
     
     // Construct final string
     strcpy(finalDisplay, leftPart);
@@ -577,6 +581,9 @@ void handleExposureChange(bool increase, bool isContinuousPress, bool &pressHand
        // Seconds Mode: +/- 0.1s
        if (increase) exposureTimerValue += EXPOSURE_TIMER_STEP;
        else exposureTimerValue -= EXPOSURE_TIMER_STEP;
+       
+       // Round to avoid floating point drift
+       exposureTimerValue = roundToTenth(exposureTimerValue);
     }
 
     // Bounds check
@@ -818,7 +825,7 @@ void loop() {
       if (lastButton == btn2 && focusTimerRunning && isContinuousPress) {
         // Stop timer from continuous press and restore normal state
         focusTimerStop();
-        hwSetLED(1, 0);
+        hwSetLED(0, 0);
         setNormalState();
       } else if (lastButton == btn2 && focusTimerRunning && focusTimerElapsed > 0) {
         // Stop timer from short press but keep displaying time
@@ -862,5 +869,5 @@ void loop() {
   // Track last button for release detection
   lastButton = buttons;
   
-  delay(50); // Small delay to prevent overwhelming the loop
+  delay(10); // Small delay to prevent overwhelming the loop
 }

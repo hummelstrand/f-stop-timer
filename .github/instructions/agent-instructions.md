@@ -15,7 +15,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 ### FocusLight Timer (btn2)
 - Count-up timer: short press toggles on/off; long press (hold > 300ms) runs timer while held
 - Maximum: 120 seconds
-- LED2 (position 1) lights while running, relay turns ON
+- LED1 (position 0) lights while running, relay turns ON
 - Display format: "FOC  " + time (e.g., "FOC  12.6")
 - Continuous press: timer runs and stops on button release
 - Short press: toggles between running and cleared states
@@ -24,7 +24,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 
 ### Exposure Timer (btn6/btn7/btn8)
 - Count-down timer; adjustable via btn6 (decrease) and btn7 (increase)
-- **Seconds Mode**: default behavior; decreases/increases in 0.1s steps
+- **Seconds Mode**: default behavior; decreases/increases in 0.1s steps. Values are rounded to 1 decimal place to prevent floating-point drift.
 - **F-Stop Mode**: active when Base Exposure is set (via btn3); decreases/increases by selected f-stop steps (via btn4)
 - Range: 0.1s to 999.9s; default: 8.0s
 - Auto-repeat on btn6/btn7: same acceleration logic as FocusLight
@@ -39,8 +39,9 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - **btn3**: Toggles Base Exposure mode.
   - Sets current exposure time as the "Base" value.
   - Display splits: Left side shows "BASE" (if value == base) or f-stop difference (e.g., "-1.00", " 0.33"); Right side shows time.
+  - Spacing between left/right parts reduces to 0 if needed (e.g. "BASE100.5") to preserve decimal precision for values > 99.9.
   - LEDs 3-7 indicate the selected f-stop step size.
-- **btn4**: Cycles f-stop step sizes (1.0, 0.5, 0.33, 0.17, 0.08).
+- **btn4**: Cycles f-stop step sizes (1.0, 0.5, 0.333333, 0.25, 0.166667).
   - Briefly displays "STEP X.XX" (e.g., "STEP 0.33") for 1 second.
   - Step size selection is persistent.
 
