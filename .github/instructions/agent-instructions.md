@@ -4,7 +4,7 @@
 This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown). Legacy sketches live in the `legacy_darkroom_timer/` folder. A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
 
 ## Big picture
-- Hardware: TM1638 module with 8 buttons, 8 LEDs, plus relay and buzzer
+- Hardware: TM1638 module with 8 buttons, 8 LEDs. A ESP12-1R-MV board with 230 V relay. An external buzzer.
 - The code is organized into sections: Hardware Interface (display, LEDs, relay, button reading), Button Handling (switch statement for each button), and Timer Updates (per-loop execution)
 - Platform support: Conditional compilation handles Arduino (`__AVR__`) and ESP8266 (`ESP8266`) targets; `HIGH_FREQ` flag optimizes TM1638 timing for high-clock MCUs
 - Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16)

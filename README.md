@@ -1,5 +1,5 @@
 # f-stop-timer
-A darkroom timer allowing exposure changes in EVs / f-stops. The timer controls a mains relay and uses standard hardware. 
+A darkroom timer allowing exposure changes in EVs / f-stops. The timer controls a mains relay and uses readily available hardware; a TM1638 module with 8 buttons + 8 LEDs, and an ESP12-1R-MV (ESP32) board with a built-in 230 V relay. 
 
 This project is heavily indebted to Gavin Lyons https://github.com/glyons/Darkroom-Timer for the inspiration, concept, and hardware. As I added more features to his project I felt that the button-presses were often missed so I decided to restart the codebase with a fresh approach, while adding my own features.
 
