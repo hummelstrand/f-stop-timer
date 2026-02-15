@@ -1,13 +1,13 @@
 # Agent instructions for F-Stop Timer
 
 ## Quick context
-This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown). A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
+This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown), plus a rotary encoder for exposure adjustments. A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
 
 ## Big picture
-- Hardware: TM1638 module with 8 buttons, 8 LEDs. A ESP12-1R-MV board with 230 V relay. An external buzzer.
+- Hardware: TM1638 module with 8 buttons, 8 LEDs. An ESP12-1R-MV (ESP8266) with 230 V relay. An external buzzer. Optional rotary encoder (A/B + push switch).
 - The code is organized into sections: Hardware Interface (display, LEDs, relay, button reading), Button Handling (switch statement for each button), and Timer Updates (per-loop execution)
 - Platform support: Conditional compilation handles Arduino (`__AVR__`) and ESP8266 (`ESP8266`) targets; `HIGH_FREQ` flag optimizes TM1638 timing for high-clock MCUs
-- Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16)
+- Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16), ENC_A_PIN (4), ENC_B_PIN (0), ENC_SW_PIN (2)
 - Display/LED brightness is configurable via `DISPLAY_LED_BRIGHTNESS` and applied by `hwApplyBrightness()` (range 0–7)
 
 ## Timer functionality
@@ -19,8 +19,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - Display format: "FOC  " + time (e.g., "FOC  12.6")
 - Continuous press: timer runs and stops on button release
 - Short press: toggles between running and cleared states
-- Buzzer: short beep every second and long beep every 10 seconds (long overrides short on 10s)
-  - Note: `focusTimerBuzzerUpdate()` exists but is **not called** in `loop()` yet.
+- Buzzer: long beep every 10 seconds
 
 ### Exposure Timer (btn6/btn7/btn8)
 - Count-down timer; adjustable via btn6 (decrease) and btn7 (increase)
@@ -45,6 +44,11 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
   - Briefly displays "STEP X.XX" (e.g., "STEP 0.33") for 1 second.
   - Step size selection is persistent.
 
+### Rotary Encoder (A/B)
+- Alternate input for exposure adjustments when no timers are running
+- Acceleration: faster detents apply larger steps (multipliers 4x and 10x)
+- Encoder push button is not mapped yet
+
 ### Normal State
 - Displays current `exposureTimerValue` (right-aligned, 1 decimal place, e.g., "   12.5")
 - If Base Exposure is set: shows split display (Diff + Time) and LEDs 3-7 active
@@ -63,11 +67,15 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - `AUTO_REPEAT_INTERVAL_ULTRA`: 2
 - `AUTO_REPEAT_FAST_THRESHOLD`: 1500
 - `AUTO_REPEAT_ULTRA_THRESHOLD`: 3000
-- `STARTUP_ALL_ON_MS`: 500
-- `VERSION_DISPLAY_MS`: 1000
+- `STARTUP_ALL_ON_MS`: 400
+- `VERSION_DISPLAY_MS`: 1100
+- `STEP_DISPLAY_DURATION`: 1000
+- `ENCODER_DEBOUNCE_MS`: 2
+- `ENCODER_ACCEL_FAST_MS`: 60
+- `ENCODER_ACCEL_ULTRA_MS`: 30
 
 ## App version
-- `APP_VERSION`: "VERS 0.1.0"
+- `APP_VERSION`: "VERS 0.9.1"
 - `BUZZER_SHORT_FREQUENCY`: 2400 Hz
 - `BUZZER_LONG_FREQUENCY`: 440 Hz
 - `BUZZER_SHORT_BEEP_MS`: 40
@@ -89,6 +97,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - **Continuous press detection**: `hwCheckContinuousPress()` manages `continuousPressDetected`, `buttonPressStartTime`, `lastAutoRepeatTime`
 - **Focus Timer functions**: `focusTimerStart()`, `focusTimerStop()`, `focusTimerClear()`, `focusTimerUpdate()` handle FocusLight logic
 - **Exposure Timer functions**: `startExposureTimer()`, `pauseExposureTimer()`, `resumeExposureTimer()`, `stopExposureTimer()`, `updateExposureTimer()`, `handleExposureChange()` encapsulate exposure logic
+- **Encoder functions**: `readEncoderStep()` decodes A/B transitions and `handleEncoderExposureStep()` applies changes
 - **Normal state**: `setNormalState()` centralizes display/relay/LED reset
 - **Loop structure**: Button handling in switch/case delegates to helper functions; `updateExposureTimer()` called explicitly
 
