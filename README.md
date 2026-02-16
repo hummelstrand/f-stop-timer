@@ -10,8 +10,8 @@ This project is heavily indebted to Gavin Lyons https://github.com/glyons/Darkro
 - Rotary encoder: COM-10982 (quadrature A/B + push switch)
 
 ## Parts list (vendor-agnostic)
-- ESP8266 relay module (ESP12-1R-MV or equivalent with 230 V relay)
-- TM1638 LED/key module (8-segment + 8 buttons + 8 LEDs)
+- ESP8266 relay module (ESP12-1R-MV or equivalent with 230 V AC mains relay)
+- TM1638 LED/key module (8-segments + 8 buttons + 8 LEDs)
 - Passive piezo buzzer (3.3 V compatible)
 - Rotary encoder with push button (quadrature A/B + SW, e.g., COM-10982)
 - Jumper wires (Dupont) and hookup wire
@@ -68,7 +68,7 @@ GND        -------------------> GND
 
 ESP12-1R-MV (ESP8266)
 --------------------
-GPIO5  (RELAY) ----> Onboard relay control
+GPIO5  (RELAY) ----> Onboard relay control (already connected on the baord)
 GPIO16 (BUZZER) --> Buzzer + (Buzzer - to GND)
 ```
 
@@ -93,6 +93,6 @@ Notes:
 ## Possible features:
 - Mapping the encoder push button to a function.
 
-## Features that won't be implemented:
-- Brightness control via buttons.
+## Features that probably won't be implemented:
+- Brightness control of display and LEDs.
 - Storing any values or settings to EEPROM (to ensure longevity of the hardware).
