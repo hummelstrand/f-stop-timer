@@ -4,16 +4,16 @@ A darkroom timer allowing exposure changes in EVs / f-stops. The timer controls 
 This project is heavily indebted to Gavin Lyons https://github.com/glyons/Darkroom-Timer for the inspiration, concept, and hardware. As I added more features to his project I felt that the button-presses were often missed so I decided to restart the codebase with a fresh approach, while adding my own features.
 
 ## Hardware
-- Controller: ESP12-1R-MV (ESP8266) with onboard 230 V relay
-- Display/input: TM1638 module (8 buttons + 8 LEDs)
+- Controller: ESP12-1R-MV (ESP8266) with onboard 230 V AC mains relay
+- Display and button input: TM1638 module (8-segments + 8 buttons + 8 LEDs)
+- Rotary encoder input: COM-10982 (quadrature A/B + push switch)
 - Buzzer: passive piezo
-- Rotary encoder: COM-10982 (quadrature A/B + push switch)
 
 ## Parts list (vendor-agnostic)
-- ESP8266 relay module (ESP12-1R-MV or equivalent with 230 V AC mains relay)
-- TM1638 LED/key module (8-segments + 8 buttons + 8 LEDs)
-- Passive piezo buzzer (3.3 V compatible)
+- ESP8266 relay module (ESP12-1R-MV or equivalent)
+- TM1638 LED/Key module
 - Rotary encoder with push button (quadrature A/B + SW, e.g., COM-10982)
+- Passive piezo buzzer (3.3 V compatible)
 - Jumper wires (Dupont) and hookup wire
 - Enclosure, mains-rated cable/strain relief, and insulated terminals (for relay wiring)
 
