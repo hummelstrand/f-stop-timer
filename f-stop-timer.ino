@@ -25,35 +25,48 @@ void setNormalState();
   #define CLOCK_TM 13
   #define DIO_TM 12
   #define HIGH_FREQ true   // true for high freq CPU > ~100 MHz
+#else
+  #error "Unsupported target: compile this sketch for an ESP8266 board (or AVR), not UNO R4 Renesas"
 #endif
 
 #define RELAY_PIN 5 // Relay control pin
 #define BUZZER_PIN 16 // Buzzer control pin
 
-// Rotary encoder inputs (COM-10982)
-// Wiring uses GPIO4 (A), GPIO0 (B), GPIO2 (SW). All are active-low with pull-ups.
-// NOTE: GPIO0 and GPIO2 are boot-strap pins on ESP8266. They must be HIGH at boot.
-// Using INPUT_PULLUP keeps them HIGH when idle so the board boots normally.
-// Do not hold the encoder button during reset/boot, or it may enter flash mode.
-#define ENC_A_PIN 4   // Encoder CLK/A
-#define ENC_B_PIN 0   // Encoder DT/B
-#define ENC_SW_PIN 2  // Encoder push button (SW)
-// Encoder tuning
-#define ENCODER_INVERT_DIRECTION false // Set true to swap CW/CCW behavior
-const unsigned long ENCODER_DEBOUNCE_MS = 2; // Minimum time between state changes
-// Encoder acceleration tuning (based on time between detents)
+// Rotary encoder 1 (exposure adjustment)
+// Wiring uses GPIO4 (A), GPIO3 (B). Active-low with pull-ups.
+#define ENC1_A_PIN 4   // Encoder 1 CLK/A
+#define ENC1_B_PIN 3   // Encoder 1 DT/B
+// Encoder 1 tuning
+#define ENCODER1_INVERT_DIRECTION false // Set true to swap CW/CCW behavior
+const unsigned long ENCODER1_DEBOUNCE_MS = 2; // Minimum time between state changes
+
+// Rotary encoder 2 (f-stop step control)
+// Disabled by default to avoid using ESP8266 boot-strap pins as inputs.
+// Use btn4 for step-size control unless you explicitly enable encoder 2.
+#define ENABLE_ENCODER2 false
+#if ENABLE_ENCODER2
+#define ENC2_A_PIN 2   // Encoder 2 CLK/A
+#define ENC2_B_PIN 15  // Encoder 2 DT/B
+#endif
+// Encoder 2 tuning
+#define ENCODER2_INVERT_DIRECTION false // Set true to swap CW/CCW behavior
+const unsigned long ENCODER2_DEBOUNCE_MS = 2; // Minimum time between state changes
+// Encoder 1 acceleration tuning (based on time between detents)
 // Typical values: 120 ms (slow), 60 ms (medium), 30 ms (fast)
 // If you want a more/less aggressive feel, raise or lower the thresholds or
 // change the multipliers. Smaller thresholds = harder to trigger acceleration.
-const unsigned long ENCODER_ACCEL_FAST_MS = 60;
-const unsigned long ENCODER_ACCEL_ULTRA_MS = 30;
-const uint8_t ENCODER_ACCEL_FAST_MULT = 4;
-const uint8_t ENCODER_ACCEL_ULTRA_MULT = 10;
+const unsigned long ENCODER1_ACCEL_FAST_MS = 60;
+const unsigned long ENCODER1_ACCEL_ULTRA_MS = 30;
+const uint8_t ENCODER1_ACCEL_FAST_MULT = 4;
+const uint8_t ENCODER1_ACCEL_ULTRA_MULT = 10;
+// Encoder 2 is used for discrete step selection, so no acceleration needed
 
 // App version
-const char APP_VERSION[] = "VERS 0.9.1";
+const char APP_VERSION[] = "VERS 0.9.2";
 const unsigned long VERSION_DISPLAY_MS = 1100;
 const unsigned long STARTUP_ALL_ON_MS = 400;
+const unsigned long IO_DIAG_SEGMENT_HOLD_MS = 1000;
+const unsigned long IO_DIAG_ENCODER_INDICATOR_MS = 250;
 
 // Display/LED brightness (0 = dimmest, 7 = brightest)
 const uint8_t DISPLAY_LED_BRIGHTNESS = 0;
@@ -137,20 +150,90 @@ unsigned long stepDisplayStartTime = 0;
 const unsigned long STEP_DISPLAY_DURATION = 1000;
 bool stepDisplayActive = false;
 
+// Input/Output diagnostic mode (hold btn8 during startup to enter)
+bool ioDiagModeActive = false;
+unsigned long ioDiagModeStartMs = 0;
+int8_t ioDiagLastEncoderDirection = 0;
+unsigned long ioDiagLastEncoderDirectionMs = 0;
+
 // Buzzer timing state
 unsigned long focusLastLongBeepSecond = 0;
 unsigned long exposureLastLongBeepSecond = 0;
 unsigned long exposureBeepAccumulatedMs = 0;
 
-// Rotary encoder state tracking
+// Rotary encoder 1 state tracking (exposure adjustment)
 // We use a Gray-code transition table to decode direction and suppress bounce.
 // Each read forms a 2-bit state: (A << 1) | B, where A/B are active-low.
 // The 4-bit index (prev << 2) | curr maps to -1, 0, +1 step fragments.
 // A full detent normally produces 4 fragments, so we accumulate until +/-4.
-uint8_t encoderPrevState = 0;
-int8_t encoderStepAccum = 0;
-unsigned long encoderLastTransitionMs = 0;
-unsigned long encoderLastDetentMs = 0;
+uint8_t encoder1PrevState = 0;
+int8_t encoder1StepAccum = 0;
+unsigned long encoder1LastTransitionMs = 0;
+unsigned long encoder1LastDetentMs = 0;
+
+// Rotary encoder 2 state tracking (f-stop step control)
+#if ENABLE_ENCODER2
+uint8_t encoder2PrevState = 0;
+int8_t encoder2StepAccum = 0;
+unsigned long encoder2LastTransitionMs = 0;
+#endif
+
+bool hasSingleButtonPressed(uint8_t buttons, uint8_t &buttonNumber) {
+  if (buttons == 0) return false;
+
+  // Exactly one bit set => a single button press
+  if ((buttons & (buttons - 1)) != 0) return false;
+
+  for (uint8_t i = 0; i < 8; i++) {
+    if (buttons & (1 << i)) {
+      buttonNumber = i + 1;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void updateIODiagnosticsMode() {
+  // Keep outputs in a known safe state
+  hwSetRelay(false);
+  hwSetLEDs(0xFF);
+
+  unsigned long nowMs = millis();
+
+  // Show all segments for a short period, then switch to live diagnostics
+  if (nowMs - ioDiagModeStartMs < IO_DIAG_SEGMENT_HOLD_MS) {
+    hwDisplayText("8.8.8.8.8.8.8.8.");
+    return;
+  }
+
+  uint8_t buttons = hwReadButton();
+  int8_t encoderStep = readEncoder1Step();
+  if (encoderStep != 0) {
+    ioDiagLastEncoderDirection = (encoderStep > 0) ? 1 : -1;
+    ioDiagLastEncoderDirectionMs = nowMs;
+  }
+
+  char buttonPart[6];
+  uint8_t buttonNumber = 0;
+  if (buttons == 0) {
+    strcpy(buttonPart, "B0");
+  } else if (hasSingleButtonPressed(buttons, buttonNumber)) {
+    snprintf(buttonPart, sizeof(buttonPart), "B%u", buttonNumber);
+  } else {
+    strcpy(buttonPart, "BM");
+  }
+
+  const char* encoderPart = "E0";
+  if (nowMs - ioDiagLastEncoderDirectionMs <= IO_DIAG_ENCODER_INDICATOR_MS) {
+    if (ioDiagLastEncoderDirection > 0) encoderPart = "E+";
+    else if (ioDiagLastEncoderDirection < 0) encoderPart = "E-";
+  }
+
+  char displayBuf[16];
+  snprintf(displayBuf, sizeof(displayBuf), "%s %s", buttonPart, encoderPart);
+  hwDisplayText(displayBuf);
+}
 
 /*
   Apply brightness settings for display and LEDs.
@@ -536,27 +619,51 @@ void setup() {
 
   // --------------------------------------------------------------------------
   // ROTARY ENCODER INPUT SETUP
-  // The encoder is a passive mechanical device. Its A/B contacts and button
-  // switch connect the input pin to GND when activated. When released, the
-  // inputs would otherwise float (random HIGH/LOW) and cause false triggers.
+  // The encoders are passive mechanical devices. Their A/B contacts connect
+  // the input pin to GND when activated. When released, the inputs would
+  // otherwise float (random HIGH/LOW) and cause false triggers.
   //
   // INPUT_PULLUP enables the ESP8266's internal pull-up resistor so each pin
-  // is held HIGH (3.3V) by default and reads LOW only when the switch closes.
+  // is held HIGH (3.3V) by default and reads LOW only when the contact closes.
   // This avoids extra external resistors for the encoder signals.
   //
-  // IMPORTANT: GPIO0 and GPIO2 must be HIGH at boot for normal startup.
-  // The pull-ups help ensure this, but still avoid holding the encoder button
-  // or rotating the encoder while power-cycling or resetting the board.
-  pinMode(ENC_A_PIN, INPUT_PULLUP);
-  pinMode(ENC_B_PIN, INPUT_PULLUP);
-  pinMode(ENC_SW_PIN, INPUT_PULLUP);
+  // Encoder 2 is optional and disabled by default to avoid boot-strap pins.
+  // If enabled, it uses GPIO2/GPIO15 which must remain at valid boot levels.
+  pinMode(ENC1_A_PIN, INPUT_PULLUP);
+  pinMode(ENC1_B_PIN, INPUT_PULLUP);
+
+#if ENABLE_ENCODER2
+  pinMode(ENC2_A_PIN, INPUT_PULLUP);
+  pinMode(ENC2_B_PIN, INPUT_PULLUP);
+#endif
   // --------------------------------------------------------------------------
 
-  // Initialize encoder state to the current pin levels so the first read
+  // Initialize encoder 1 state to the current pin levels so the first read
   // does not generate a false movement event.
-  uint8_t aInit = (digitalRead(ENC_A_PIN) == LOW) ? 1 : 0;
-  uint8_t bInit = (digitalRead(ENC_B_PIN) == LOW) ? 1 : 0;
-  encoderPrevState = (aInit << 1) | bInit;
+  uint8_t a1Init = (digitalRead(ENC1_A_PIN) == LOW) ? 1 : 0;
+  uint8_t b1Init = (digitalRead(ENC1_B_PIN) == LOW) ? 1 : 0;
+  encoder1PrevState = (a1Init << 1) | b1Init;
+
+  // Initialize encoder 2 state
+  #if ENABLE_ENCODER2
+  uint8_t a2Init = (digitalRead(ENC2_A_PIN) == LOW) ? 1 : 0;
+  uint8_t b2Init = (digitalRead(ENC2_B_PIN) == LOW) ? 1 : 0;
+  encoder2PrevState = (a2Init << 1) | b2Init;
+  #endif
+
+  // Optional Input/Output diagnostic mode:
+  // Hold btn8 during boot to keep all LEDs on and show input diagnostics.
+  uint8_t startupButtons = hwReadButton();
+  if ((startupButtons & btn8) != 0) {
+    ioDiagModeActive = true;
+    ioDiagModeStartMs = millis();
+    ioDiagLastEncoderDirection = 0;
+    ioDiagLastEncoderDirectionMs = 0;
+    hwSetLEDs(0xFF);
+    hwDisplayText("8.8.8.8.8.8.8.8.");
+    Serial.println("Input/Output diagnostic mode active (btn8 held at startup)");
+    return;
+  }
 
   // Startup: all segments and LEDs on briefly
   hwDisplayText("8.8.8.8.8.8.8.8.");
@@ -640,7 +747,7 @@ void handleExposureChange(bool increase, bool isContinuousPress, bool &pressHand
 }
 
 // ---------------------------------------------------------------------------
-// ROTARY ENCODER INPUT (no button mapping yet)
+// ROTARY ENCODER 1 INPUT (exposure adjustment)
 //
 // We read the A/B pins and decode direction using a Gray-code transition table.
 // Mechanical encoders bounce, which can produce rapid A/B changes. The table
@@ -648,10 +755,10 @@ void handleExposureChange(bool increase, bool isContinuousPress, bool &pressHand
 // typically 4 transitions. We accumulate those until +/-4 and then emit
 // a single logical step. This keeps the UI stable without extra hardware.
 //
-// The encoder is treated as an alternate input for exposure adjustments and
+// Encoder 1 is treated as an alternate input for exposure adjustments and
 // does not change the existing btn6/btn7 behavior.
 // ---------------------------------------------------------------------------
-int8_t readEncoderStep() {
+int8_t readEncoder1Step() {
   static const int8_t transitionTable[16] = {
     0, -1,  1,  0,
     1,  0,  0, -1,
@@ -659,42 +766,42 @@ int8_t readEncoderStep() {
     0,  1, -1,  0
   };
 
-  uint8_t a = (digitalRead(ENC_A_PIN) == LOW) ? 1 : 0;
-  uint8_t b = (digitalRead(ENC_B_PIN) == LOW) ? 1 : 0;
+  uint8_t a = (digitalRead(ENC1_A_PIN) == LOW) ? 1 : 0;
+  uint8_t b = (digitalRead(ENC1_B_PIN) == LOW) ? 1 : 0;
   uint8_t state = (a << 1) | b;
 
-  if (state == encoderPrevState) return 0;
+  if (state == encoder1PrevState) return 0;
 
   // Debounce: ignore rapid transitions within a very short window.
   // This reduces bounce without adding noticeable lag to rotation.
   unsigned long nowMs = millis();
-  if (nowMs - encoderLastTransitionMs < ENCODER_DEBOUNCE_MS) {
+  if (nowMs - encoder1LastTransitionMs < ENCODER1_DEBOUNCE_MS) {
     return 0;
   }
-  encoderLastTransitionMs = nowMs;
+  encoder1LastTransitionMs = nowMs;
 
-  uint8_t index = (encoderPrevState << 2) | state;
+  uint8_t index = (encoder1PrevState << 2) | state;
   int8_t fragment = transitionTable[index];
-  encoderPrevState = state;
+  encoder1PrevState = state;
 
   if (fragment != 0) {
-    encoderStepAccum += fragment;
-    if (encoderStepAccum >= 4) {
-      encoderStepAccum = 0;
-      return ENCODER_INVERT_DIRECTION ? -1 : 1; // clockwise
+    encoder1StepAccum += fragment;
+    if (encoder1StepAccum >= 4) {
+      encoder1StepAccum = 0;
+      return ENCODER1_INVERT_DIRECTION ? -1 : 1; // clockwise
     }
-    if (encoderStepAccum <= -4) {
-      encoderStepAccum = 0;
-      return ENCODER_INVERT_DIRECTION ? 1 : -1; // counter-clockwise
+    if (encoder1StepAccum <= -4) {
+      encoder1StepAccum = 0;
+      return ENCODER1_INVERT_DIRECTION ? 1 : -1; // counter-clockwise
     }
   }
 
   return 0;
 }
 
-// Apply one encoder step to the exposure time (same rules as btn6/btn7).
+// Apply one encoder 1 step to the exposure time (same rules as btn6/btn7).
 // This does not affect focus or exposure timers while running or paused.
-void handleEncoderExposureStep(int8_t direction) {
+void handleEncoder1ExposureStep(int8_t direction) {
   if (direction == 0) return;
 
   if (focusTimerRunning || exposureTimerRunning || exposureTimerPaused) return;
@@ -702,14 +809,14 @@ void handleEncoderExposureStep(int8_t direction) {
   // Acceleration: if detents arrive quickly, apply a larger step.
   // This keeps fine control when turning slowly, but speeds up large changes.
   unsigned long nowMs = millis();
-  unsigned long deltaMs = (encoderLastDetentMs == 0) ? 0 : (nowMs - encoderLastDetentMs);
-  encoderLastDetentMs = nowMs;
+  unsigned long deltaMs = (encoder1LastDetentMs == 0) ? 0 : (nowMs - encoder1LastDetentMs);
+  encoder1LastDetentMs = nowMs;
 
   uint8_t stepMult = 1;
-  if (deltaMs > 0 && deltaMs <= ENCODER_ACCEL_ULTRA_MS) {
-    stepMult = ENCODER_ACCEL_ULTRA_MULT;
-  } else if (deltaMs > 0 && deltaMs <= ENCODER_ACCEL_FAST_MS) {
-    stepMult = ENCODER_ACCEL_FAST_MULT;
+  if (deltaMs > 0 && deltaMs <= ENCODER1_ACCEL_ULTRA_MS) {
+    stepMult = ENCODER1_ACCEL_ULTRA_MULT;
+  } else if (deltaMs > 0 && deltaMs <= ENCODER1_ACCEL_FAST_MS) {
+    stepMult = ENCODER1_ACCEL_FAST_MULT;
   }
 
   if (stepDisplayActive) {
@@ -736,6 +843,79 @@ void handleEncoderExposureStep(int8_t direction) {
 
   setNormalState();
 }
+
+// ---------------------------------------------------------------------------
+// ROTARY ENCODER 2 INPUT (f-stop step control)
+//
+// Encoder 2 cycles through the f-stop step sizes (1.0, 0.5, 0.33, 0.25, 0.17).
+// This provides an alternate control to btn4.
+// Encoder 2 is only active when Base Exposure mode is set (baseExposureSet).
+// ---------------------------------------------------------------------------
+#if ENABLE_ENCODER2
+int8_t readEncoder2Step() {
+  static const int8_t transitionTable[16] = {
+    0, -1,  1,  0,
+    1,  0,  0, -1,
+   -1,  0,  0,  1,
+    0,  1, -1,  0
+  };
+
+  uint8_t a = (digitalRead(ENC2_A_PIN) == LOW) ? 1 : 0;
+  uint8_t b = (digitalRead(ENC2_B_PIN) == LOW) ? 1 : 0;
+  uint8_t state = (a << 1) | b;
+
+  if (state == encoder2PrevState) return 0;
+
+  unsigned long nowMs = millis();
+  if (nowMs - encoder2LastTransitionMs < ENCODER2_DEBOUNCE_MS) {
+    return 0;
+  }
+  encoder2LastTransitionMs = nowMs;
+
+  uint8_t index = (encoder2PrevState << 2) | state;
+  int8_t fragment = transitionTable[index];
+  encoder2PrevState = state;
+
+  if (fragment != 0) {
+    encoder2StepAccum += fragment;
+    if (encoder2StepAccum >= 4) {
+      encoder2StepAccum = 0;
+      return ENCODER2_INVERT_DIRECTION ? -1 : 1; // clockwise
+    }
+    if (encoder2StepAccum <= -4) {
+      encoder2StepAccum = 0;
+      return ENCODER2_INVERT_DIRECTION ? 1 : -1; // counter-clockwise
+    }
+  }
+
+  return 0;
+}
+
+// Apply encoder 2 step to f-stop step size selection.
+// Only active when Base Exposure mode is set and no timers are running.
+void handleEncoder2FStopStep(int8_t direction) {
+  if (direction == 0) return;
+
+  if (focusTimerRunning || exposureTimerRunning) return;
+  
+  // Only active when Base Exposure is set
+  if (!baseExposureSet) return;
+
+  // Cycle through f-stop steps
+  if (direction > 0) {
+    fStopStepIndex++;
+    if (fStopStepIndex > 4) fStopStepIndex = 0;
+  } else {
+    fStopStepIndex--;
+    if (fStopStepIndex < 0) fStopStepIndex = 4;
+  }
+
+  // Show step briefly
+  stepDisplayActive = true;
+  stepDisplayStartTime = millis();
+  setNormalState();
+}
+#endif
 
 void startExposureTimer() {
   if (focusTimerRunning || focusTimerElapsed > 0) {
@@ -800,15 +980,27 @@ void updateExposureTimer() {
 }
 
 void loop() {
+  if (ioDiagModeActive) {
+    updateIODiagnosticsMode();
+    delay(10);
+    return;
+  }
+
   // Read button state
   uint8_t buttons = hwReadButton();
   
   // Check for continuous press detection (300 ms threshold)
   bool isContinuousPress = hwCheckContinuousPress(buttons, CONTINUOUS_PRESS_THRESHOLD);
 
-  // Rotary encoder input (A/B only). No mapping for the encoder pushbutton yet.
-  int8_t encoderStep = readEncoderStep();
-  handleEncoderExposureStep(encoderStep);
+  // Rotary encoder 1: exposure adjustment (replaces btn6/btn7 functionality)
+  int8_t encoder1Step = readEncoder1Step();
+  handleEncoder1ExposureStep(encoder1Step);
+
+  #if ENABLE_ENCODER2
+  // Rotary encoder 2: f-stop step control (replaces btn4 functionality)
+  int8_t encoder2Step = readEncoder2Step();
+  handleEncoder2FStopStep(encoder2Step);
+  #endif
 
   // ============================================================================
   // BUTTON HANDLING SECTION

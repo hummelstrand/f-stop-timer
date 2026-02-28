@@ -4,10 +4,10 @@
 This is an Arduino-based darkroom enlarger timer project. The primary active sketch is `f-stop-timer.ino` which implements two timer modes: FocusLight Timer (count-up) and Exposure Timer (countdown), plus a rotary encoder for exposure adjustments. A local Arduino library `TM1638plus` under `libraries/TM1638plus/` provides the display (8-segment LED) and button interface.
 
 ## Big picture
-- Hardware: TM1638 module with 8 buttons, 8 LEDs. An ESP12-1R-MV (ESP8266) with 230 V relay. An external buzzer. Optional rotary encoder (A/B + push switch).
+- Hardware: TM1638 module with 8 buttons, 8 LEDs and an 8-segment display. An ESP12-1R-MV (ESP8266) with 230 V relay. An external buzzer. Two rotary encoders (A/B only, no switches/LEDs).
 - The code is organized into sections: Hardware Interface (display, LEDs, relay, button reading), Button Handling (switch statement for each button), and Timer Updates (per-loop execution)
 - Platform support: Conditional compilation handles Arduino (`__AVR__`) and ESP8266 (`ESP8266`) targets; `HIGH_FREQ` flag optimizes TM1638 timing for high-clock MCUs
-- Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16), ENC_A_PIN (4), ENC_B_PIN (0), ENC_SW_PIN (2)
+- Pin mappings at the top of `f-stop-timer.ino`: STROBE_TM, CLOCK_TM, DIO_TM (display), RELAY_PIN (5), BUZZER_PIN (16), ENC1_A_PIN (4), ENC1_B_PIN (3); Encoder 2 on ENC2_A_PIN (2)/ENC2_B_PIN (15) is optional and disabled by default; GPIO0/IO0 intentionally unused
 - Display/LED brightness is configurable via `DISPLAY_LED_BRIGHTNESS` and applied by `hwApplyBrightness()` (range 0–7)
 
 ## Timer functionality
@@ -44,10 +44,51 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
   - Briefly displays "STEP X.XX" (e.g., "STEP 0.33") for 1 second.
   - Step size selection is persistent.
 
-### Rotary Encoder (A/B)
-- Alternate input for exposure adjustments when no timers are running
-- Acceleration: faster detents apply larger steps (multipliers 4x and 10x)
-- Encoder push button is not mapped yet
+### Rotary Encoders
+- **Encoder 1 (GPIO4/GPIO3):** Alternate input for exposure adjustments when no timers are running (replaces btn6/btn7). Acceleration: faster detents apply larger steps (multipliers 4x and 10x).
+- **Encoder 2 (optional, GPIO2/GPIO15):** Can cycle through f-stop step sizes when Base Exposure mode is active (replaces btn4), but is disabled by default due to boot-strap risk on ESP8266 pins.
+- Encoder push-switch pins (SW) are not used and should remain unconnected.
+
+### Input/Output diagnostic mode
+- Enter by holding **btn8** at boot/reset.
+- Purpose: verify TM1638 button reads and Encoder 1 direction without entering normal timer logic.
+- Relay is forced OFF in this mode.
+- All TM1638 LEDs stay ON continuously.
+- Display behavior:
+  - First 1 second: all segments ON (`8.8.8.8.8.8.8.8.`)
+  - Then live diagnostics: buttons (`B0`, `B1`..`B8`, `BM`) and encoder direction (`E-`, `E0`, `E+`).
+- Mode is latched for that boot; exit by rebooting without holding **btn8**.
+
+## ESP8266 boot-pin safety notes
+
+The ESP8266 samples boot-strap pins during reset. Required levels at boot:
+
+| Pin | Required boot level | Failure mode if incorrect |
+| --- | --- | --- |
+| **GPIO0** | **HIGH** | Enters programming/flash mode instead of normal sketch boot |
+| **GPIO2** | **HIGH** | Boot failure or invalid boot mode |
+| **GPIO15** | **LOW** | Boot failure or invalid boot mode |
+
+Why these pins can cause problems:
+- Mechanical contacts (buttons/encoders) can bounce and briefly force LOW/HIGH during reset.
+- If that glitch occurs at boot sampling time, the ESP8266 may not start the application.
+
+Why GPIO0 is intentionally unused:
+- **GPIO0/IO0** is intentionally unused as a user input because accidental LOW at reset puts the board into flashing mode.
+- Avoiding GPIO0 prevents intermittent "won't boot" behavior caused by external switches/encoders.
+
+## Why some GPIOs are intentionally unused
+- **GPIO0/IO0** is intentionally unused as input to avoid accidental LOW at boot (programming mode).
+- **GPIO2/GPIO15** are avoided by default (Encoder 2 disabled) for the same boot-strap reason.
+- **GPIO6–GPIO11** are reserved for onboard flash on ESP-12 modules and should not be used as external I/O.
+- **GPIO1/GPIO3** are UART TX/RX and can interfere with flashing/serial debugging if heavily loaded.
+
+## Boot-safe wiring checklist (ESP8266)
+- Keep **GPIO0** free from user inputs (no button/encoder wiring).
+- Keep **GPIO2/GPIO15** free from mechanical inputs unless explicitly designing for boot-strap requirements.
+- Ensure external wiring cannot pull **GPIO0/GPIO2** LOW during reset.
+- Ensure external wiring cannot pull **GPIO15** HIGH during reset.
+- If boot issues appear, test with external inputs disconnected, then reconnect one signal at a time.
 
 ### Normal State
 - Displays current `exposureTimerValue` (right-aligned, 1 decimal place, e.g., "   12.5")
@@ -69,6 +110,8 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - `AUTO_REPEAT_ULTRA_THRESHOLD`: 3000
 - `STARTUP_ALL_ON_MS`: 400
 - `VERSION_DISPLAY_MS`: 1100
+- `BOOT_DIAG_SEGMENT_HOLD_MS`: 1000
+- `BOOT_DIAG_ENCODER_INDICATOR_MS`: 250
 - `STEP_DISPLAY_DURATION`: 1000
 - `ENCODER_DEBOUNCE_MS`: 2
 - `ENCODER_ACCEL_FAST_MS`: 60
@@ -97,7 +140,7 @@ This is an Arduino-based darkroom enlarger timer project. The primary active ske
 - **Continuous press detection**: `hwCheckContinuousPress()` manages `continuousPressDetected`, `buttonPressStartTime`, `lastAutoRepeatTime`
 - **Focus Timer functions**: `focusTimerStart()`, `focusTimerStop()`, `focusTimerClear()`, `focusTimerUpdate()` handle FocusLight logic
 - **Exposure Timer functions**: `startExposureTimer()`, `pauseExposureTimer()`, `resumeExposureTimer()`, `stopExposureTimer()`, `updateExposureTimer()`, `handleExposureChange()` encapsulate exposure logic
-- **Encoder functions**: `readEncoderStep()` decodes A/B transitions and `handleEncoderExposureStep()` applies changes
+- **Encoder functions**: `readEncoder1Step()` / `handleEncoder1ExposureStep()` for exposure, `readEncoder2Step()` / `handleEncoder2FStopStep()` for f-stop steps
 - **Normal state**: `setNormalState()` centralizes display/relay/LED reset
 - **Loop structure**: Button handling in switch/case delegates to helper functions; `updateExposureTimer()` called explicitly
 
