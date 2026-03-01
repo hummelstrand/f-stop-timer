@@ -34,8 +34,8 @@ This project is heavily indebted to Gavin Lyons <https://github.com/glyons/Darkr
 - **Focus Light Control:** Relay control with count-up timer (great for burning in with additional exposure without having to set a timer). Automatic shut-off after 120s. Toggle on/off or hold down the button to run and release to stop.
 - **Cancel Button:** Stops all timers and returns to normal state.
 - **Audio Feedback:** Long beep every 10 seconds for both timers.
-- **Startup:** Version display preceded by an all-segments/all-LEDs test.
-- **Input/Output diagnostic mode:** Hold `btn8` during boot to enter a persistent diagnostic mode. All LEDs stay ON, relay is forced OFF, all segments are shown for 1 second, then display shows button and encoder activity (`B0`, `B1`..`B8`, `BM`; and `E-`, `E0`, `E+`).
+- **Startup:** Brief version display preceded by an all-segments (`8.8.8.8.8.8.8.8.`) and all-LED test.
+- **Input/Output diagnostic mode:** Hold `btn8` during boot to enter a persistent diagnostic mode. All LEDs stay ON, relay is forced OFF, all display segments are shown for 1 second, then display shows activity by buttons and encoder (`B0`, `B1`..`B8`, `BM`; and `E-`, `E0`, `E+`).
 - **Brightness:** Variable brightness set in code.
 - **Rotary Encoder:** Adjust exposure time with acceleration for fast turns (replaces btn6/btn7).
 
