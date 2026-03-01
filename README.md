@@ -41,7 +41,7 @@ This project is heavily indebted to Gavin Lyons <https://github.com/glyons/Darkr
 
 ## Wiring notes
 
-- Encoder 1: A/B wired to GPIO4, GPIO3 with internal pull-ups (active-low). **Note: GPIO3 is physically labeled as `RX` on the board's header.**
+- Encoder 1: A/B wired to GPIO4, GPIO3 `RX` with internal pull-ups (active-low). **Note: GPIO3 is physically labeled as `RX` on the board's header.**
 - Encoder push-switch pins (SW) are intentionally left unconnected.
 - GPIO0 (IO0) is intentionally unused.
 
@@ -107,7 +107,7 @@ Use this mode for quick hardware verification of TM1638 inputs and encoder direc
 | Relay control | GPIO5 | RELAY_PIN |
 | Buzzer | GPIO16 | BUZZER_PIN |
 | Encoder 1 A | GPIO4 | ENC1_A_PIN (active-low, pull-up) |
-| Encoder 1 B | GPIO3 | ENC1_B_PIN (active-low, pull-up). **Labeled as `RX` on the board.** |
+| Encoder 1 B | GPIO3 `RX` | ENC1_B_PIN (active-low, pull-up). **Labeled as `RX` on the board.** |
 
 ## Wiring diagram (ASCII)
 
