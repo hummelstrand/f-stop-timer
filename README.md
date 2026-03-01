@@ -14,6 +14,7 @@ This project is heavily indebted to Gavin Lyons <https://github.com/glyons/Darkr
 ## Parts list (vendor-agnostic)
 
 - ESP8266 relay module (ESP12-1R-MV or equivalent)
+  reference: <https://devices.esphome.io/devices/esp-12f-relay-x1/>
 - TM1638 LED/Key module
 - Rotary encoder (quadrature A/B, e.g., COM-10982; SW not connected)
 - Passive piezo buzzer (3.3 V compatible)
@@ -36,14 +37,11 @@ This project is heavily indebted to Gavin Lyons <https://github.com/glyons/Darkr
 - **Startup:** Version display preceded by an all-segments/all-LEDs test.
 - **Input/Output diagnostic mode:** Hold `btn8` during boot to enter a persistent diagnostic mode. All LEDs stay ON, relay is forced OFF, all segments are shown for 1 second, then display shows button and encoder activity (`B0`, `B1`..`B8`, `BM`; and `E-`, `E0`, `E+`).
 - **Brightness:** Variable brightness set in code.
-- **Rotary Encoders:**
-  - **Encoder 1:** Adjust exposure time with acceleration for fast turns (replaces btn6/btn7).
-  - **Encoder 2 (optional):** Can cycle through f-stop step sizes when Base Exposure mode is active (replaces btn4). Disabled by default to avoid ESP8266 boot-strap pins; use `btn4` for this function.
+- **Rotary Encoder:** Adjust exposure time with acceleration for fast turns (replaces btn6/btn7).
 
 ## Wiring notes
 
-- Encoder 1: A/B wired to GPIO4, GPIO3 with internal pull-ups (active-low).
-- Encoder 2: not connected by default.
+- Encoder 1: A/B wired to GPIO4, GPIO3 with internal pull-ups (active-low). **Note: GPIO3 is physically labeled as `RX` on the board's header.**
 - Encoder push-switch pins (SW) are intentionally left unconnected.
 - GPIO0 (IO0) is intentionally unused.
 
@@ -59,18 +57,18 @@ The ESP8266 samples certain pins during reset to decide boot mode. These pins mu
 
 Why this can cause problems:
 
-- Buttons and rotary encoders are mechanical contacts and can bounce or momentarily short to GND/VCC during reset.
+- Buttons and rotary encoder are mechanical contacts and can bounce or momentarily short to GND/VCC during reset.
 - If they are wired directly to boot-strap pins, they can force the wrong level exactly when the ESP8266 samples those pins.
 - Result: the board may not boot your timer sketch reliably (or may appear "dead" until reset/reflash).
 
 Why GPIO0 is intentionally unused:
 
 - **GPIO0 (IO0)** is left unused as a user input because any accidental LOW during reset puts the chip into flashing mode.
-- This prevents hard-to-diagnose startup failures caused by external switches/encoders connected to GPIO0.
+- This prevents hard-to-diagnose startup failures caused by external switches/encoder connected to GPIO0.
 
 Other intentionally avoided or special-purpose pins:
 
-- **GPIO2/GPIO15** are avoided by default in this project (Encoder 2 disabled) for the same boot-strap reason.
+- **GPIO2/GPIO15** are avoided by default in this project for the same boot-strap reason.
 - **GPIO6–GPIO11** are connected to onboard flash memory on ESP-12 class modules and should not be used for external I/O.
 - **GPIO1/GPIO3** are UART TX/RX; they are usable but can interfere with serial logging/flashing if loaded incorrectly.
 
@@ -79,7 +77,7 @@ Other intentionally avoided or special-purpose pins:
 Before powering up:
 
 - Leave **GPIO0** unconnected for user controls (do not wire buttons/encoder contacts to it).
-- Keep **Encoder 2 disabled** unless you intentionally design around **GPIO2/GPIO15** boot constraints.
+- Keep **GPIO2/GPIO15** free from mechanical inputs unless you intentionally design around boot constraints.
 - Verify no external circuit can pull **GPIO0** or **GPIO2** LOW during reset.
 - Verify no external circuit can pull **GPIO15** HIGH during reset.
 - Avoid connecting noisy/mechanical signals directly to boot-strap pins.
@@ -109,9 +107,7 @@ Use this mode for quick hardware verification of TM1638 inputs and encoder direc
 | Relay control | GPIO5 | RELAY_PIN |
 | Buzzer | GPIO16 | BUZZER_PIN |
 | Encoder 1 A | GPIO4 | ENC1_A_PIN (active-low, pull-up) |
-| Encoder 1 B | GPIO3 | ENC1_B_PIN (active-low, pull-up) |
-| Encoder 2 A (optional) | GPIO2 | ENC2_A_PIN (disabled by default; boot-strap pin) |
-| Encoder 2 B (optional) | GPIO15 | ENC2_B_PIN (disabled by default; boot-strap pin) |
+| Encoder 1 B | GPIO3 | ENC1_B_PIN (active-low, pull-up). **Labeled as `RX` on the board.** |
 
 ## Wiring diagram (ASCII)
 
@@ -127,15 +123,7 @@ GND        -------------------> GND
 ESP12-1R-MV (ESP8266)           Rotary Encoder 1
 --------------------           ----------------
 GPIO4  (ENC1_A) --------------> A/CLK
-GPIO3  (ENC1_B) --------------> B/DT
-GND        -------------------> C (common)
-SW         -------------------> (not connected)
-
-ESP12-1R-MV (ESP8266)           Rotary Encoder 2 (optional)
---------------------           ---------------------------
-Not connected by default. If enabled in code (`ENABLE_ENCODER2 = true`):
-GPIO2  (ENC2_A) --------------> A/CLK
-GPIO15 (ENC2_B) --------------> B/DT
+GPIO3 / RX (ENC1_B) ----------> B/DT
 GND        -------------------> C (common)
 SW         -------------------> (not connected)
 
@@ -167,7 +155,7 @@ Notes:
 
 ## Possible features
 
-- Add switches or LEDs to the encoders (requires freeing up GPIO pins).
+- Add switch or LED to the encoder (requires freeing up GPIO pins).
 
 ## Features that probably won't be implemented
 

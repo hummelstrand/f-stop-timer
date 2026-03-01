@@ -33,24 +33,13 @@ void setNormalState();
 #define BUZZER_PIN 16 // Buzzer control pin
 
 // Rotary encoder 1 (exposure adjustment)
-// Wiring uses GPIO4 (A), GPIO3 (B). Active-low with pull-ups.
+// Wiring uses GPIO4 (A), GPIO3 (B, labeled RX). Active-low with pull-ups.
 #define ENC1_A_PIN 4   // Encoder 1 CLK/A
-#define ENC1_B_PIN 3   // Encoder 1 DT/B
+#define ENC1_B_PIN 3   // Encoder 1 DT/B (Labeled RX on the board)
 // Encoder 1 tuning
 #define ENCODER1_INVERT_DIRECTION false // Set true to swap CW/CCW behavior
 const unsigned long ENCODER1_DEBOUNCE_MS = 2; // Minimum time between state changes
 
-// Rotary encoder 2 (f-stop step control)
-// Disabled by default to avoid using ESP8266 boot-strap pins as inputs.
-// Use btn4 for step-size control unless you explicitly enable encoder 2.
-#define ENABLE_ENCODER2 false
-#if ENABLE_ENCODER2
-#define ENC2_A_PIN 2   // Encoder 2 CLK/A
-#define ENC2_B_PIN 15  // Encoder 2 DT/B
-#endif
-// Encoder 2 tuning
-#define ENCODER2_INVERT_DIRECTION false // Set true to swap CW/CCW behavior
-const unsigned long ENCODER2_DEBOUNCE_MS = 2; // Minimum time between state changes
 // Encoder 1 acceleration tuning (based on time between detents)
 // Typical values: 120 ms (slow), 60 ms (medium), 30 ms (fast)
 // If you want a more/less aggressive feel, raise or lower the thresholds or
@@ -59,7 +48,6 @@ const unsigned long ENCODER1_ACCEL_FAST_MS = 60;
 const unsigned long ENCODER1_ACCEL_ULTRA_MS = 30;
 const uint8_t ENCODER1_ACCEL_FAST_MULT = 4;
 const uint8_t ENCODER1_ACCEL_ULTRA_MULT = 10;
-// Encoder 2 is used for discrete step selection, so no acceleration needed
 
 // App version
 const char APP_VERSION[] = "VERS 0.9.2";
@@ -170,13 +158,6 @@ uint8_t encoder1PrevState = 0;
 int8_t encoder1StepAccum = 0;
 unsigned long encoder1LastTransitionMs = 0;
 unsigned long encoder1LastDetentMs = 0;
-
-// Rotary encoder 2 state tracking (f-stop step control)
-#if ENABLE_ENCODER2
-uint8_t encoder2PrevState = 0;
-int8_t encoder2StepAccum = 0;
-unsigned long encoder2LastTransitionMs = 0;
-#endif
 
 bool hasSingleButtonPressed(uint8_t buttons, uint8_t &buttonNumber) {
   if (buttons == 0) return false;
@@ -626,16 +607,8 @@ void setup() {
   // INPUT_PULLUP enables the ESP8266's internal pull-up resistor so each pin
   // is held HIGH (3.3V) by default and reads LOW only when the contact closes.
   // This avoids extra external resistors for the encoder signals.
-  //
-  // Encoder 2 is optional and disabled by default to avoid boot-strap pins.
-  // If enabled, it uses GPIO2/GPIO15 which must remain at valid boot levels.
   pinMode(ENC1_A_PIN, INPUT_PULLUP);
   pinMode(ENC1_B_PIN, INPUT_PULLUP);
-
-#if ENABLE_ENCODER2
-  pinMode(ENC2_A_PIN, INPUT_PULLUP);
-  pinMode(ENC2_B_PIN, INPUT_PULLUP);
-#endif
   // --------------------------------------------------------------------------
 
   // Initialize encoder 1 state to the current pin levels so the first read
@@ -643,13 +616,6 @@ void setup() {
   uint8_t a1Init = (digitalRead(ENC1_A_PIN) == LOW) ? 1 : 0;
   uint8_t b1Init = (digitalRead(ENC1_B_PIN) == LOW) ? 1 : 0;
   encoder1PrevState = (a1Init << 1) | b1Init;
-
-  // Initialize encoder 2 state
-  #if ENABLE_ENCODER2
-  uint8_t a2Init = (digitalRead(ENC2_A_PIN) == LOW) ? 1 : 0;
-  uint8_t b2Init = (digitalRead(ENC2_B_PIN) == LOW) ? 1 : 0;
-  encoder2PrevState = (a2Init << 1) | b2Init;
-  #endif
 
   // Optional Input/Output diagnostic mode:
   // Hold btn8 during boot to keep all LEDs on and show input diagnostics.
@@ -844,77 +810,6 @@ void handleEncoder1ExposureStep(int8_t direction) {
   setNormalState();
 }
 
-// ---------------------------------------------------------------------------
-// ROTARY ENCODER 2 INPUT (f-stop step control)
-//
-// Encoder 2 cycles through the f-stop step sizes (1.0, 0.5, 0.33, 0.25, 0.17).
-// This provides an alternate control to btn4.
-// Encoder 2 is only active when Base Exposure mode is set (baseExposureSet).
-// ---------------------------------------------------------------------------
-#if ENABLE_ENCODER2
-int8_t readEncoder2Step() {
-  static const int8_t transitionTable[16] = {
-    0, -1,  1,  0,
-    1,  0,  0, -1,
-   -1,  0,  0,  1,
-    0,  1, -1,  0
-  };
-
-  uint8_t a = (digitalRead(ENC2_A_PIN) == LOW) ? 1 : 0;
-  uint8_t b = (digitalRead(ENC2_B_PIN) == LOW) ? 1 : 0;
-  uint8_t state = (a << 1) | b;
-
-  if (state == encoder2PrevState) return 0;
-
-  unsigned long nowMs = millis();
-  if (nowMs - encoder2LastTransitionMs < ENCODER2_DEBOUNCE_MS) {
-    return 0;
-  }
-  encoder2LastTransitionMs = nowMs;
-
-  uint8_t index = (encoder2PrevState << 2) | state;
-  int8_t fragment = transitionTable[index];
-  encoder2PrevState = state;
-
-  if (fragment != 0) {
-    encoder2StepAccum += fragment;
-    if (encoder2StepAccum >= 4) {
-      encoder2StepAccum = 0;
-      return ENCODER2_INVERT_DIRECTION ? -1 : 1; // clockwise
-    }
-    if (encoder2StepAccum <= -4) {
-      encoder2StepAccum = 0;
-      return ENCODER2_INVERT_DIRECTION ? 1 : -1; // counter-clockwise
-    }
-  }
-
-  return 0;
-}
-
-// Apply encoder 2 step to f-stop step size selection.
-// Only active when Base Exposure mode is set and no timers are running.
-void handleEncoder2FStopStep(int8_t direction) {
-  if (direction == 0) return;
-
-  if (focusTimerRunning || exposureTimerRunning) return;
-  
-  // Only active when Base Exposure is set
-  if (!baseExposureSet) return;
-
-  // Cycle through f-stop steps
-  if (direction > 0) {
-    fStopStepIndex++;
-    if (fStopStepIndex > 4) fStopStepIndex = 0;
-  } else {
-    fStopStepIndex--;
-    if (fStopStepIndex < 0) fStopStepIndex = 4;
-  }
-
-  // Show step briefly
-  stepDisplayActive = true;
-  stepDisplayStartTime = millis();
-  setNormalState();
-}
 #endif
 
 void startExposureTimer() {
@@ -996,11 +891,6 @@ void loop() {
   int8_t encoder1Step = readEncoder1Step();
   handleEncoder1ExposureStep(encoder1Step);
 
-  #if ENABLE_ENCODER2
-  // Rotary encoder 2: f-stop step control (replaces btn4 functionality)
-  int8_t encoder2Step = readEncoder2Step();
-  handleEncoder2FStopStep(encoder2Step);
-  #endif
 
   // ============================================================================
   // BUTTON HANDLING SECTION
